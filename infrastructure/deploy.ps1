@@ -128,10 +128,9 @@ $installScriptLines = @(
   "systemctl restart docker",
   # --- CLONE DELLA REPO ---
   "cd /home/azureuser",
-  "git clone https://github.com/<username>/<github-repo>.git project",
+  "git clone https://github.com/Zernez/confidential-ai-healthcare-demo.git project",
   "chown -R azureuser:azureuser project"
 )
-
 
 # Wait for VMs to be fully provisioned
 Start-Sleep -Seconds 30
