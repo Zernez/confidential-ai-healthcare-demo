@@ -12,9 +12,9 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     && rm -rf /var/lib/apt/lists/*
 
 # Install Miniconda
-RUN wget -q https://repo.anaconda.com/miniconda/Miniconda3-latest-Linux-aarch64.sh -O /tmp/miniconda.sh || \
-    wget -q https://repo.anaconda.com/miniconda/Miniconda3-latest-Linux-x86_64.sh -O /tmp/miniconda.sh && \
+RUN wget -q https://repo.anaconda.com/miniconda/Miniconda3-latest-Linux-x86_64.sh -O /tmp/miniconda.sh && \
     bash /tmp/miniconda.sh -b -p $CONDA_DIR && rm -f /tmp/miniconda.sh
+
 
 # Create RAPIDS env (CUDA 12.2), install cudf/cuml/cupy + essentials
 RUN conda create -y -n rapids python=3.10 && \
@@ -27,10 +27,7 @@ RUN conda create -y -n rapids python=3.10 && \
 WORKDIR /app
 
 # Copy project
-COPY ../main.py .
-COPY ../attestation.py .
-COPY ../train_model.py .
-COPY ../infer_model.py .
+COPY ../project .
 
 # Optional: install any python-only requirements in the env
 # RUN conda run -n rapids pip install -r requirements.txt
