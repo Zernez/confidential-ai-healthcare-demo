@@ -120,6 +120,7 @@ $installScriptLines = @(
   "apt-get -y install nvidia-driver-535 || true",
   "apt-get -y install tdx-qgs-vm libtdx-attest || true",
   "apt-get -y install docker.io",
+  "sudo apt-get install -y docker-buildx-plugin",
   'distribution=$(. /etc/os-release; echo $ID$VERSION_ID)',
   "curl -fsSL https://nvidia.github.io/libnvidia-container/gpgkey | gpg --dearmor -o /usr/share/keyrings/nvidia-container-toolkit-keyring.gpg",
   'curl -s -L https://nvidia.github.io/libnvidia-container/$distribution/libnvidia-container.list | sed \"s#deb https://#deb [signed-by=/usr/share/keyrings/nvidia-container-toolkit-keyring.gpg] https://#g\" | tee /etc/apt/sources.list.d/nvidia-container-toolkit.list',
@@ -129,7 +130,8 @@ $installScriptLines = @(
   # --- CLONE DELLA REPO ---
   "cd /home/azureuser",
   "git clone https://github.com/Zernez/confidential-ai-healthcare-demo.git",
-  "chown -R azureuser:azureuser project"
+  "chown -R azureuser:azureuser project",
+  "export DOCKER_BUILDKIT=1"
 )
 
 # Wait for VMs to be fully provisioned

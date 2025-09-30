@@ -17,6 +17,9 @@ RUN wget -q https://repo.anaconda.com/miniconda/Miniconda3-latest-Linux-x86_64.s
 
 
 # Create RAPIDS env (CUDA 12.2), install cudf/cuml/cupy + essentials
+RUN conda tos accept --override-channels --channel https://repo.anaconda.com/pkgs/main && \
+    conda tos accept --override-channels --channel https://repo.anaconda.com/pkgs/r
+
 RUN conda create -y -n rapids python=3.10 && \
     conda install -y -n rapids -c rapidsai -c conda-forge \
       cudf=24.06 cuml=24.06 cupy cuda-version=12.2 && \
