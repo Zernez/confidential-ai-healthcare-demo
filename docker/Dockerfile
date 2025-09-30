@@ -30,7 +30,7 @@ RUN conda create -y -n rapids python=3.10 && \
 WORKDIR /app
 
 # Copy project
-COPY ../project .
+COPY . /app
 
 # Optional: install any python-only requirements in the env
 # RUN conda run -n rapids pip install -r requirements.txt
