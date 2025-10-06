@@ -13,10 +13,11 @@ else
 fi
 
 echo "Avvio main.py..."
+
 if [ -f "docker/requirements.txt" ]; then
     echo "Installo dipendenze da requirements.txt..."
-    pip install --upgrade pip
-    pip install -r docker/requirements.txt
+    python -m pip install --upgrade pip
+    python -m pip install -r docker/requirements.txt
 fi
 
 python main.py
