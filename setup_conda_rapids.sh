@@ -14,9 +14,11 @@ fi
 source $(conda info --base)/etc/profile.d/conda.sh
 
 # Crea ambiente RAPIDS
-conda create -y -n rapids python=3.10 -c rapidsai -c conda-forge cudf=24.06 cuml=24.06 cupy
+conda create -y -n rapids python=3.10 -c rapidsai -c conda-forge
+source $(conda info --base)/etc/profile.d/conda.sh
+conda activate rapids
+conda install -y -c rapidsai -c conda-forge cudf=24.06 cuml=24.06 cupy
 
 # Attiva ambiente
-conda activate rapids
 
 echo "Ambiente rapids pronto! Ora puoi eseguire run_local.sh."
