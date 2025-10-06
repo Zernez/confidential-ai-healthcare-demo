@@ -33,7 +33,7 @@ WORKDIR /app
 COPY . /app
 
 # Optional: install any python-only requirements in the env
-COPY requirements.txt /app/
+COPY docker/requirements.txt /app/requirements.txt
 RUN conda run -n rapids pip install -r /app/requirements.txt
 
 # Default command: run main in RAPIDS env
