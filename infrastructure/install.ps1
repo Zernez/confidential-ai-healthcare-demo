@@ -9,25 +9,34 @@ $installScriptLines = @(
   "set -e",
   "export DEBIAN_FRONTEND=noninteractive",
   "apt-get update",
-  "apt-get install -y build-essential curl jq ca-certificates gnupg lsb-release pciutils net-tools unzip python3 python3-pip git",
-  'distribution=$(. /etc/os-release; echo $ID$VERSION_ID)',
-  "wget https://developer.download.nvidia.com/compute/cuda/repos/ubuntu2204/x86_64/cuda-keyring_1.1-1_all.deb",
-  "dpkg -i cuda-keyring_1.1-1_all.deb || true",
+  # Install prerequisites
+  "apt-get install -y ca-certificates curl gnupg lsb-release git",
+  # Rimuovi vecchie versioni di Docker se presenti
+  "apt-get remove -y docker docker-engine docker.io containerd runc || true",
+  # Add Docker's official GPG key
+  "install -m 0755 -d /etc/apt/keyrings",
+  "curl -fsSL https://download.docker.com/linux/ubuntu/gpg | gpg --dearmor -o /etc/apt/keyrings/docker.gpg",
+  "chmod a+r /etc/apt/keyrings/docker.gpg",
+  # Set up Docker repository - versione statica per Ubuntu 22.04 jammy
+  "echo 'deb [arch=amd64 signed-by=/etc/apt/keyrings/docker.gpg] https://download.docker.com/linux/ubuntu jammy stable' > /etc/apt/sources.list.d/docker.list",
+  # Installa Docker Engine e plugin
   "apt-get update",
-  "apt-get -y install cuda-toolkit-12-2",
-  "apt-get -y install nvidia-driver-535 || true",
-  "apt-get -y install docker.io",
-  "curl -fsSL https://nvidia.github.io/libnvidia-container/gpgkey | gpg --batch --yes --dearmor -o /usr/share/keyrings/nvidia-container-toolkit-keyring.gpg",
-  "curl -s -L https://nvidia.github.io/libnvidia-container/stable/ubuntu22.04/libnvidia-container.list \
-  | sed 's#deb https://#deb [signed-by=/usr/share/keyrings/nvidia-container-toolkit-keyring.gpg] https://#g' \
-  > /etc/apt/sources.list.d/nvidia-container-toolkit.list",
+  "apt-get install -y docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin",
+  # Abilita e avvia Docker
+  "systemctl enable docker",
+  "systemctl start docker",
+  # Installa NVIDIA Container Toolkit e configura Docker per GPU
+  "install -d /usr/share/keyrings",
+  "curl -fsSL https://nvidia.github.io/libnvidia-container/gpgkey | gpg --dearmor -o /usr/share/keyrings/nvidia-container-toolkit-keyring.gpg",
+  "curl -s -L https://nvidia.github.io/libnvidia-container/stable/ubuntu22.04/libnvidia-container.list | sed 's#deb https://#deb [signed-by=/usr/share/keyrings/nvidia-container-toolkit-keyring.gpg] https://#g' > /etc/apt/sources.list.d/nvidia-container-toolkit.list",
+  "apt-get update",
+  "apt-get install -y nvidia-container-toolkit",
   "nvidia-ctk runtime configure --runtime=docker || true",
   "systemctl restart docker",
   # --- CLONE REPO ---
   "cd /home/$AdminUser",
   "if [ ! -d project ]; then git clone https://github.com/Zernez/confidential-ai-healthcare-demo.git project; fi",
   'chown -R $AdminUser:$AdminUser project',
-  'rm -f cuda-keyring_1.1-1_all.deb',
   'apt-get clean'
 )
 

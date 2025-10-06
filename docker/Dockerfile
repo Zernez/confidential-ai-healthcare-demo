@@ -33,7 +33,7 @@ WORKDIR /app
 COPY . /app
 
 # Optional: install any python-only requirements in the env
-# RUN conda run -n rapids pip install -r requirements.txt
+RUN conda run -n rapids pip install -r requirements.txt
 
 # Default command: run main in RAPIDS env
 CMD ["conda", "run", "-n", "rapids", "python", "main.py"]

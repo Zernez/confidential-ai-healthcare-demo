@@ -1,5 +1,5 @@
 Param(
-  [string]$Account = "fernando.pannullo@hotmail.com",
+  [string]$Account = "fernando.pannullo@collaboratore.uniparthenope.it",
   [string]$RegionPref = "",
   [string]$Rg = "rg-tdx-h100-dist",
   [string]$Vnet = "vnet-tdx-h100",
@@ -91,7 +91,7 @@ foreach ($vm in @($VmCpu, $VmGpu)) {
 $nicCpuId = az network nic show -g $Rg -n "nic-$VmCpu" --query id -o tsv
 $nicGpuId = az network nic show -g $Rg -n "nic-$VmGpu" --query id -o tsv
 
-# VM GPU
+# VM GPU (Trusted Launch, Secure Boot ON)
 if (-not (az vm show -g $Rg -n $VmGpu --query name -o tsv 2>$null)) {
   az vm create -g $Rg -n $VmGpu `
     --image $ImageGPU `
@@ -105,36 +105,60 @@ if (-not (az vm show -g $Rg -n $VmGpu --query name -o tsv 2>$null)) {
     --os-disk-security-encryption-type DiskWithVMGuestState | Out-Null
 }
 
-
-# Installazione pacchetti + clone repo
-$installScriptLines = @(
+# --- PHASE 1: install NVIDIA driver via ubuntu-drivers (signed; Secure Boot-friendly) ---
+$installDriver = @(
   "set -e",
+  "export DEBIAN_FRONTEND=noninteractive",
   "apt-get update",
-  "apt-get install -y build-essential curl jq ca-certificates gnupg lsb-release pciutils net-tools unzip python3 python3-pip git",
-  'distribution=$(. /etc/os-release; echo $ID$VERSION_ID)',
-#  'wget https://developer.download.nvidia.com/compute/cuda/repos/$distribution/x86_64/cuda-keyring_1.1-1_all.deb',
-  'wget https://developer.download.nvidia.com/compute/cuda/repos/ubuntu2204/x86_64/cuda-keyring_1.1-1_all.deb',
-  "dpkg -i cuda-keyring_1.1-1_all.deb || true",
-  "apt-get update",
-  "apt-get -y install cuda-toolkit-12-2",
-  "apt-get -y install nvidia-driver-535 || true",
-  "apt-get -y install tdx-qgs-vm libtdx-attest || true",
-  "apt-get -y install docker.io",
-  "sudo apt-get install -y docker-buildx-plugin",
-  'distribution=$(. /etc/os-release; echo $ID$VERSION_ID)',
-  "curl -fsSL https://nvidia.github.io/libnvidia-container/gpgkey | gpg --dearmor -o /usr/share/keyrings/nvidia-container-toolkit-keyring.gpg",
-  'curl -s -L https://nvidia.github.io/libnvidia-container/$distribution/libnvidia-container.list | sed \"s#deb https://#deb [signed-by=/usr/share/keyrings/nvidia-container-toolkit-keyring.gpg] https://#g\" | tee /etc/apt/sources.list.d/nvidia-container-toolkit.list',
-  "apt-get update && apt-get install -y nvidia-container-toolkit || true",
-  "nvidia-ctk runtime configure --runtime=docker || true",
-  "systemctl restart docker",
-  # --- CLONE DELLA REPO ---
-  "cd /home/azureuser",
-  "git clone https://github.com/Zernez/confidential-ai-healthcare-demo.git",
-  "chown -R azureuser:azureuser project",
-  "export DOCKER_BUILDKIT=1"
+  "apt-get install -y ubuntu-drivers-common",
+  "ubuntu-drivers install",
+  "echo 'Driver install triggered; reboot required...'"
 )
 
-# Wait for VMs to be fully provisioned
-Start-Sleep -Seconds 30
+Start-Sleep -Seconds 20
+# az vm run-command invoke -g $Rg -n $VmGpu --command-id RunShellScript --scripts $installDriver | Out-Null
 
-az vm run-command invoke -g $Rg -n $VmGpu --command-id RunShellScript --scripts $installScriptLines
+# Reboot to load signed NVIDIA kernel modules
+#az vm restart -g $Rg -n $VmGpu | Out-Null
+# Start-Sleep -Seconds 20
+
+# --- PHASE 2: Docker + NVIDIA Container Toolkit + repo clone ---
+$installContainer = @(
+  "set -e",
+  "export DEBIAN_FRONTEND=noninteractive",
+  "apt-get update",
+  # Install prerequisites
+  "apt-get install -y ca-certificates curl gnupg lsb-release git",
+  # Add Docker's official GPG key
+  "install -m 0755 -d /etc/apt/keyrings",
+  "curl -fsSL https://download.docker.com/linux/ubuntu/gpg | gpg --dearmor -o /etc/apt/keyrings/docker.gpg",
+  "chmod a+r /etc/apt/keyrings/docker.gpg",
+  # Set up Docker repository
+  "echo ""deb [arch=`$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.gpg] https://download.docker.com/linux/ubuntu `$(lsb_release -cs) stable"" > /etc/apt/sources.list.d/docker.list",
+  
+  
+  # Install Docker Engine
+  # "apt-get update",
+  # "apt-get install -y docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin",
+  # NVIDIA Container Toolkit repo keyring and list
+  # "install -d /usr/share/keyrings",
+  # "curl -fsSL https://nvidia.github.io/libnvidia-container/gpgkey | gpg --dearmor -o /usr/share/keyrings/nvidia-container-toolkit-keyring.gpg",
+  # "curl -s -L https://nvidia.github.io/libnvidia-container/stable/ubuntu22.04/libnvidia-container.list " +
+  #   "| sed 's#deb https://#deb [signed-by=/usr/share/keyrings/nvidia-container-toolkit-keyring.gpg] https://#g' " +
+  #   "> /etc/apt/sources.list.d/nvidia-container-toolkit.list",
+  # "apt-get update",
+  # "apt-get install -y nvidia-container-toolkit",
+  # Configure Docker runtime
+  # "nvidia-ctk runtime configure --runtime=docker || true",
+  "systemctl restart docker",
+  # Clone repo
+  "cd /home/${AdminUser}",
+  "if [ ! -d project ]; then git clone https://github.com/Zernez/confidential-ai-healthcare-demo.git project; fi",
+  "chown -R ${AdminUser}:${AdminUser} /home/${AdminUser}/project"
+  # Basic host verification
+  # "nvidia-smi || true"
+)
+
+az vm run-command invoke -g $Rg -n $VmGpu --command-id RunShellScript --scripts $installContainer | Out-Null
+
+Write-Host "Provisioning completato. Esegui 'nvidia-smi' via SSH sulla VM per verificare i driver e prova un container: docker run --rm --gpus all nvidia/cuda:12.2.0-base nvidia-smi"
