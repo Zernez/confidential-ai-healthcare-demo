@@ -19,6 +19,10 @@ source $(conda info --base)/etc/profile.d/conda.sh
 conda activate rapids
 conda install -y -c rapidsai -c conda-forge cudf=24.06 cuml=24.06 cupy
 
-# Attiva ambiente
+# Installa requirements.txt con pip
+if [ -f "docker/requirements.txt" ]; then
+    echo "Installazione dipendenze da requirements.txt..."
+    pip install -r docker/requirements.txt
+fi
 
 echo "Ambiente rapids pronto! Ora puoi eseguire run_local.sh."
