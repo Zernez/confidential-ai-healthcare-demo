@@ -3,15 +3,18 @@ import numpy as np
 from sklearn.datasets import load_diabetes
 from sklearn.model_selection import train_test_split
 
-import cudf
-import cupy as cp
-from cuml.ensemble import RandomForestRegressor
+# Import RAPIDS solo quando necessario (dopo che env vars sono impostate)
 
 class MLTrainer:
     def __init__(self, model_path="model_diabetes_gpu.pkl"):
         self.model_path = model_path
 
     def train_and_split(self, test_size=0.2, random_state=42, n_estimators=200, max_depth=16):
+        # Import RAPIDS qui (dopo che env vars sono impostate)
+        import cudf
+        import cupy as cp
+        from cuml.ensemble import RandomForestRegressor
+        
         # Carico dataset (NumPy)
         data = load_diabetes()
         X = data.data

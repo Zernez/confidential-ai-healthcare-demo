@@ -1,11 +1,13 @@
 import joblib
-import cupy as cp
 
 class MLInferencer:
     def __init__(self, model_path="model_diabetes_gpu.pkl"):
         self.model_path = model_path
 
     def run_inference(self):
+        # Import RAPIDS qui (dopo che env vars sono impostate)
+        import cupy as cp
+        
         # Carico modello + test set (GPU types)
         model, X_test, y_test = joblib.load(self.model_path)
 
