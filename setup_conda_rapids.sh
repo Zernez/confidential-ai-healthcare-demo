@@ -19,15 +19,15 @@ if conda info --envs | grep -q rapids; then
     conda remove -n rapids --all -y
 fi
 
-# Crea ambiente RAPIDS con versioni CUDA 11.x (più stabili)
-echo "Creazione ambiente rapids con CUDA 11.x..."
-conda create -y -n rapids python=3.9
+# Crea ambiente RAPIDS con Python 3.10 (supporta Numba più recenti)
+echo "Creazione ambiente rapids con Python 3.10..."
+conda create -y -n rapids python=3.10
 source $(conda info --base)/etc/profile.d/conda.sh
 conda activate rapids
 
-# Installa RAPIDS con versioni compatibili CUDA 11.x (22.12 è l'ultima con CUDA 11.8)
-echo "Installazione RAPIDS 22.12 (compatibile CUDA 11.8)..."
-conda install -y -c rapidsai -c conda-forge -c nvidia cudf=22.12 cuml=22.12 cudatoolkit=11.8
+# Installa RAPIDS più recenti compatibili con Python 3.10
+echo "Installazione RAPIDS 24.02 (Python 3.10 + CUDA 12.x)..."
+conda install -y -c rapidsai -c conda-forge -c nvidia cudf=24.02 cuml=24.02 cuda-version=12.0
 
 # Installa requirements.txt con pip
 if [ -f "docker/requirements.txt" ]; then
