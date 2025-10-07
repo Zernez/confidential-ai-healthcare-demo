@@ -1,10 +1,6 @@
 import requests
 import json
-
-try:
-    from nv_attestation_sdk import attestation
-except ImportError:
-    attestation = None
+from nv_attestation_sdk import attestation
 
 class NvidiaAttestation:
     """
