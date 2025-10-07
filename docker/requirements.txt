@@ -1,5 +1,6 @@
 joblib==1.4.2
 requests==2.32.3
 scikit-learn
-numpy
+numpy>=1.23,<2.0
 nv-attestation-sdk
+pynvml>=11.4,<11.5
