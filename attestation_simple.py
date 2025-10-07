@@ -158,6 +158,29 @@ class NvidiaAttestation:
             return False
         
         return True
+    
+    def perform_attestation(self) -> bool:
+        """Esegue attestation completa e ritorna successo/fallimento"""
+        try:
+            attestation_data = self.get_gpu_attestation()
+            
+            # Log attestation info
+            logger.info(f"Attestation GPU: {self.gpu_info.get('name', 'Unknown')}")
+            logger.info(f"Driver: {attestation_data.get('driver_version', 'Unknown')}")
+            logger.info(f"CUDA: {attestation_data.get('cuda_version', 'Unknown')}")
+            logger.info(f"Tipo: {attestation_data.get('attestation_type', 'Unknown')}")
+            
+            gpu_ready = self.verify_gpu_ready()
+            if gpu_ready:
+                logger.info("✓ Attestation completata con successo")
+            else:
+                logger.error("✗ GPU non pronta per ML workload")
+            
+            return gpu_ready
+            
+        except Exception as e:
+            logger.error(f"Errore durante attestation: {e}")
+            return False
 
 def create_attestation_report() -> Dict[str, Any]:
     """Funzione helper per creare report attestation"""

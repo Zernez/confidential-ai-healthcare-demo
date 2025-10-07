@@ -1,15 +1,16 @@
-from attestation import NvidiaAttestation
+from attestation_simple import NvidiaAttestation
 from train_model import MLTrainer
 from infer_model import MLInferencer
 
 def main():
     # Step 1: Attestazione (centralizzata)
+    print("[MAIN] Inizializzazione attestation NVIDIA...")
     attestor = NvidiaAttestation()
     if not attestor.perform_attestation():
         print("[MAIN] Attestazione fallita. Blocco esecuzione.")
         return
 
-    print("[MAIN] Attestazione riuscita. Procedo...")
+    print("[MAIN] Attestazione riuscita. Procedo con ML pipeline...")
 
     # Step 2: Training (GPU)
     trainer = MLTrainer()
