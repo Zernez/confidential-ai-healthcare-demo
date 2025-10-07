@@ -1,3 +1,7 @@
+import os
+# Fix compatibilità Numba/CUDA per RAPIDS
+os.environ['NUMBA_CUDA_ENABLE_MINOR_VERSION_COMPATIBILITY'] = '1'
+
 from attestation_simple import NvidiaAttestation
 from train_model import MLTrainer
 from infer_model import MLInferencer
