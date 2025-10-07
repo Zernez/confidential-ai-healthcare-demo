@@ -13,11 +13,20 @@ fi
 # Attiva Conda
 source $(conda info --base)/etc/profile.d/conda.sh
 
-# Crea ambiente RAPIDS
-conda create -y -n rapids python=3.10 -c rapidsai -c conda-forge
+# Rimuovi ambiente esistente se presente
+if conda info --envs | grep -q rapids; then
+    echo "Rimuovo ambiente rapids esistente..."
+    conda remove -n rapids --all -y
+fi
+
+# Crea ambiente RAPIDS con versioni CUDA 11.x (più stabili)
+echo "Creazione ambiente rapids con CUDA 11.x..."
+conda create -y -n rapids python=3.10
 source $(conda info --base)/etc/profile.d/conda.sh
 conda activate rapids
-conda install -y -c rapidsai -c conda-forge cudf=24.06 cuml=24.06 cupy
+
+# Installa RAPIDS con versioni compatibili CUDA 11.x
+conda install -y -c rapidsai -c conda-forge cudf=23.12 cuml=23.12 cupy cuda-version=11.8
 
 # Installa requirements.txt con pip
 if [ -f "docker/requirements.txt" ]; then
