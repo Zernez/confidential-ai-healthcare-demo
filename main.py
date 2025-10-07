@@ -1,6 +1,8 @@
 import os
 # Fix compatibilità Numba/CUDA per RAPIDS - DEVE essere impostato PRIMA degli import
 os.environ['NUMBA_CUDA_ENABLE_MINOR_VERSION_COMPATIBILITY'] = '1'
+# Disabilita patch cubinlinker che causa problemi con Numba 0.60.0
+os.environ['CUBINLINKER_DISABLE_PATCH'] = '1'
 
 from attestation_simple import NvidiaAttestation
 
@@ -13,10 +15,10 @@ def main():
     print("[MAIN] Inizializzazione attestation NVIDIA...")
     attestor = NvidiaAttestation()
     if not attestor.perform_attestation():
-        print("[MAIN] ✗ Attestazione fallita. Blocco esecuzione.")
+        print("[MAIN] Attestazione fallita. Blocco esecuzione.")
         return
 
-    print("[MAIN] ✓ Attestazione riuscita. Procedo con ML pipeline...")
+    print("[MAIN] Attestazione riuscita. Procedo con ML pipeline...")
 
     # Step 2: Training (GPU)
     trainer = MLTrainer()
