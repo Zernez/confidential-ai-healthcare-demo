@@ -25,8 +25,9 @@ conda create -y -n rapids python=3.10
 source $(conda info --base)/etc/profile.d/conda.sh
 conda activate rapids
 
-# Installa RAPIDS con versioni compatibili CUDA 11.x
-conda install -y -c rapidsai -c conda-forge cudf=23.12 cuml=23.12 cupy cuda-version=11.8
+# Installa RAPIDS con versioni compatibili CUDA 11.x (22.12 è l'ultima con CUDA 11.8)
+echo "Installazione RAPIDS 22.12 (compatibile CUDA 11.8)..."
+conda install -y -c rapidsai -c conda-forge -c nvidia cudf=22.12 cuml=22.12 cudatoolkit=11.8
 
 # Installa requirements.txt con pip
 if [ -f "docker/requirements.txt" ]; then
