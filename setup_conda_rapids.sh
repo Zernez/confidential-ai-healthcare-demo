@@ -21,7 +21,7 @@ fi
 
 # Crea ambiente RAPIDS con versioni CUDA 11.x (più stabili)
 echo "Creazione ambiente rapids con CUDA 11.x..."
-conda create -y -n rapids python=3.10
+conda create -y -n rapids python=3.9
 source $(conda info --base)/etc/profile.d/conda.sh
 conda activate rapids
 
