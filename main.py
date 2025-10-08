@@ -1,8 +1,8 @@
 import os
 # Fix compatibilità Numba/CUDA per RAPIDS - DEVE essere impostato PRIMA degli import
-os.environ['NUMBA_CUDA_ENABLE_MINOR_VERSION_COMPATIBILITY'] = '1'
-# Disabilita patch cubinlinker che causa problemi con Numba 0.60.0
-os.environ['CUBINLINKER_DISABLE_PATCH'] = '1'
+# os.environ['NUMBA_CUDA_ENABLE_MINOR_VERSION_COMPATIBILITY'] = '1'
+# # Disabilita patch cubinlinker che causa problemi con Numba 0.60.0
+# os.environ['CUBINLINKER_DISABLE_PATCH'] = '1'
 
 from attestation_simple import NvidiaAttestation
 

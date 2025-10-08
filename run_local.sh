@@ -5,8 +5,8 @@ set -e
 cd "$(dirname "$0")"
 
 # Fix compatibilità Numba/CUDA per RAPIDS 
-export NUMBA_CUDA_ENABLE_MINOR_VERSION_COMPATIBILITY=1
-export CUBINLINKER_DISABLE_PATCH=1
+# export NUMBA_CUDA_ENABLE_MINOR_VERSION_COMPATIBILITY=1
+# export CUBINLINKER_DISABLE_PATCH=1
 
 echo "Attivare l'environment Conda (rapids) prima dell'esecuzione."
 
