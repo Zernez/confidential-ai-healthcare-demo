@@ -10,7 +10,8 @@ Param(
   [string]$VmCpu = "vm-tdx-cpu",
   [string]$VmGpu = "vm-h100-gpu",
   [string]$AdminUser = "azureuser",
-  [string]$SizeCpu = "Standard_DC2es_v6",
+  [string]$SizeCpu = "Standard_DCadsv6", #AMD SEV
+  [string]$SizeCpu = "Standard_DC2es_v6", #INTEL TDX
   [string]$SizeGpu = "Standard_NCC40ads_H100_v5",
   [string]$ImageCPU = "Canonical:0001-com-ubuntu-confidential-vm-jammy:22_04-lts-cvm:latest",
   [string]$ImageGPU = "Canonical:0001-com-ubuntu-confidential-vm-jammy:22_04-lts-cvm:latest"

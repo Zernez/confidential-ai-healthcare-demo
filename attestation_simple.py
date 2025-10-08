@@ -9,7 +9,7 @@ from typing import Dict, Any, Optional
 
 # Setup logging
 logging.basicConfig(level=logging.INFO)
-logger = logging.getLogger(__name__)
+logger = logging.getLogger("attestation_simple")
 
 class NvidiaAttestation:
     """
@@ -31,7 +31,9 @@ class NvidiaAttestation:
             
             if device_count > 0:
                 handle = pynvml.nvmlDeviceGetHandleByIndex(0)
-                name = pynvml.nvmlDeviceGetName(handle).decode('utf-8')
+                # --- FIX: Rimosso .decode('utf-8') ---
+                name = pynvml.nvmlDeviceGetName(handle)
+                # ------------------------------------
                 memory_info = pynvml.nvmlDeviceGetMemoryInfo(handle)
                 
                 self.gpu_info = {
@@ -40,7 +42,7 @@ class NvidiaAttestation:
                     'memory_free': memory_info.free,
                     'count': device_count
                 }
-                logger.info(f"GPU inizializzata: {name}")
+                logger.info(f"GPU inizializzata con pynvml: {name}")
             
             pynvml.nvmlShutdown()
             
@@ -123,7 +125,7 @@ class NvidiaAttestation:
         """Ottiene versione driver"""
         try:
             result = subprocess.run(['nvidia-smi', '--query-gpu=driver_version', '--format=csv,noheader'], 
-                                  capture_output=True, text=True, check=True)
+                                    capture_output=True, text=True, check=True)
             return result.stdout.strip()
         except:
             return "unknown"
