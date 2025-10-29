@@ -103,7 +103,8 @@ if (-not (az vm show -g $Rg -n $VmGpu --query name -o tsv 2>$null)) {
     --security-type ConfidentialVM `
     --enable-vtpm true `
     --enable-secure-boot true `
-    --os-disk-security-encryption-type DiskWithVMGuestState | Out-Null
+    --os-disk-security-encryption-type DiskWithVMGuestState `
+    --os-disk-size-gb 60 | Out-Null
 }
 
 # --- PHASE 1: install NVIDIA driver via ubuntu-drivers (signed; Secure Boot-friendly) ---
