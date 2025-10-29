@@ -4,27 +4,15 @@ import os
 # # Disabilita patch cubinlinker che causa problemi con Numba 0.60.0
 # os.environ['CUBINLINKER_DISABLE_PATCH'] = '1'
 
-from attestation_simple import NvidiaAttestation
+from train_model import MLTrainer
+from infer_model import MLInferencer
 
 def main():
-    # Import RAPIDS solo quando necessario (dopo env var)
-    from train_model import MLTrainer
-    from infer_model import MLInferencer
-    
-    # Step 1: Attestazione (centralizzata)
-    print("[MAIN] Inizializzazione attestation NVIDIA...")
-    attestor = NvidiaAttestation()
-    if not attestor.perform_attestation():
-        print("[MAIN] Attestazione fallita. Blocco esecuzione.")
-        return
-
-    print("[MAIN] Attestazione riuscita. Procedo con ML pipeline...")
-
-    # Step 2: Training (GPU)
+    # Step 1: Training (GPU)
     trainer = MLTrainer()
     trainer.train_and_split()
 
-    # Step 3: Inferenza (GPU)
+    # Step 2: Inferenza (GPU)
     inferencer = MLInferencer()
     inferencer.run_inference()
 

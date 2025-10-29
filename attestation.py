@@ -1,6 +1,7 @@
 import requests
 import json
 from nv_attestation_sdk import attestation
+import sys
 
 class NvidiaAttestation:
     """
@@ -106,3 +107,8 @@ class NvidiaAttestation:
         except Exception as e:
             print(f"[ATTESTATION] Errore durante attestazione: {str(e)}")
             return False
+
+if __name__ == "__main__":
+    attestor = NvidiaAttestation()
+    success = attestor.perform_attestation()
+    sys.exit(0 if success else 1)

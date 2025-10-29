@@ -18,4 +18,11 @@ echo "Avvio main.py..."
 #     python3 -m pip install -r docker/requirements.txt
 # fi
 
+# Esegui attestazione sull'host prima di avviare main.py
+python3 attestation.py
+if [ $? -ne 0 ]; then
+    echo "Attestazione fallita sull'host. Blocco esecuzione."
+    exit 1
+fi
+
 python3 main.py

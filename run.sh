@@ -27,6 +27,9 @@ for DEV in /dev/nvidia*; do
     fi
 done
 
+# Esegui attestazione sull'host prima di avviare il container
+python3 attestation.py || { echo "Attestazione fallita sull'host. Blocco esecuzione."; exit 1; }
+
 docker run --gpus all --name $CONTAINER_NAME \
     -v $(pwd):/app \
     -w /app \
