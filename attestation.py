@@ -30,7 +30,9 @@ class NvidiaAttestation:
         """
         try:
             # Ottieni l'attestazione dalla GPU
-            result = attestation.Attestation().get_evidence(None)
+            client = attestation.Attestation()
+            client.add_verifier(attestation.Devices.GPU, attestation.Environment.REMOTE, self.nas_url, "")
+            result = client.get_evidence()
             print(f"[ATTESTATION] Tipo evidence: {type(result)}")
             print(f"[ATTESTATION] Contenuto evidence: {result}")
             if not result or not isinstance(result, tuple) or len(result) < 2:
