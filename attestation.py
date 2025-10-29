@@ -29,15 +29,12 @@ class NvidiaAttestation:
         """
         try:
             # Ottieni l'attestazione dalla GPU
-            if nonce is None:
-                nonce = b""  # Nonce vuoto di default
-            
-            evidence = attestation.Attestation().get_evidence(nonce)
+            # Passa None come nonce invece di b""
+            evidence = attestation.Attestation().get_evidence(None)
             print(f"[ATTESTATION] Tipo evidence: {type(evidence)}")
             print(f"[ATTESTATION] Contenuto evidence: {evidence}")
             if not evidence:
                 raise RuntimeError("Evidence vuoto restituito dall'SDK NVIDIA.")
-            # Se evidence è bytes, non usare .get su di esso
             return evidence
             
         except Exception as e:
