@@ -107,14 +107,14 @@ if (-not (az vm show -g $Rg -n $VmGpu --query name -o tsv 2>$null)) {
 }
 
 # --- PHASE 1: install NVIDIA driver via ubuntu-drivers (signed; Secure Boot-friendly) ---
-$installDriver = @(
-  "set -e",
-  "export DEBIAN_FRONTEND=noninteractive",
-  "apt-get update",
-  "apt-get install -y ubuntu-drivers-common",
-  "ubuntu-drivers install",
-  "echo 'Driver install triggered; reboot required...'"
-)
+# $installDriver = @(
+#   "set -e",
+#   "export DEBIAN_FRONTEND=noninteractive",
+#   "apt-get update",
+#   "apt-get install -y ubuntu-drivers-common",
+#   "ubuntu-drivers install",
+#   "echo 'Driver install triggered; reboot required...'"
+# )
 
 Start-Sleep -Seconds 20
 # az vm run-command invoke -g $Rg -n $VmGpu --command-id RunShellScript --scripts $installDriver | Out-Null

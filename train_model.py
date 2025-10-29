@@ -25,19 +25,20 @@ class MLTrainer:
             X, y, test_size=test_size, random_state=random_state
         )
 
-        # Conversione a GPU (cuDF/CuPy)
-        X_train = cudf.DataFrame(X_train_np)
-        X_test = cudf.DataFrame(X_test_np)
-        y_train = cudf.Series(y_train_np)
-        y_test = cudf.Series(y_test_np)
+        # Conversione a GPU (cuDF/CuPy) e float32 per pickling
+        X_train = cudf.DataFrame(X_train_np.astype('float32'))
+        X_test = cudf.DataFrame(X_test_np.astype('float32'))
+        y_train = cudf.Series(y_train_np.astype('float32'))
+        y_test = cudf.Series(y_test_np.astype('float32'))
 
-        # Modello cuML (GPU)
+        # Modello cuML (GPU) con n_streams=1 per warning
         model = RandomForestRegressor(
             n_estimators=n_estimators,
             max_depth=max_depth,
             random_state=random_state,
             n_bins=128,
-            split_criterion="mse"
+            split_criterion="mse",
+            n_streams=1
         )
 
         print("[TRAINING] Avvio training su GPU (cuML RandomForest)...")

@@ -18,8 +18,18 @@ if [ "$(docker ps -aq -f name=$CONTAINER_NAME)" ]; then
 fi
 
 echo "Avvio container con GPU..."
+
+# Mappa device speciali NVIDIA per confidential computing se presenti
+EXTRA_DEVICES=""
+for DEV in /dev/nvidia-cc /dev/nvidia-uvm /dev/nvidia-uvm-tools; do
+    if [ -e "$DEV" ]; then
+        EXTRA_DEVICES="$EXTRA_DEVICES --device $DEV"
+    fi
+done
+
 docker run --gpus all --name $CONTAINER_NAME \
     -v $(pwd):/app \
     -w /app \
+    $EXTRA_DEVICES \
     $IMAGE_NAME \
     conda run -n rapids python main.py
