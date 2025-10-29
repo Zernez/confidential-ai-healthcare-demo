@@ -1,7 +1,7 @@
 import requests
 import json
 from nv_attestation_sdk import attestation
-from attestation_simple import NvidiaAttestation as SimpleAttestation
+from attestation_local import NvidiaAttestation as LocalAttestation
 import sys
 
 class NvidiaAttestation:
@@ -123,7 +123,7 @@ class NvidiaAttestation:
             print(f"[ATTESTATION] Errore durante attestazione: {str(e)}")
             print("[ATTESTATION] Fallback: eseguo attestazione locale semplificata...")
             try:
-                simple_attestor = SimpleAttestation()
+                simple_attestor = LocalAttestation()
                 success = simple_attestor.perform_attestation()
                 if success:
                     print("[ATTESTATION] Attestazione locale semplificata OK.")

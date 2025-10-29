@@ -5,6 +5,7 @@ Fallback compatibile senza dipendenze da funzioni CC avanzate
 import json
 import subprocess
 import logging
+import pynvml
 from typing import Dict, Any, Optional
 
 # Setup logging
@@ -25,7 +26,6 @@ class NvidiaAttestation:
         """Inizializza informazioni GPU"""
         try:
             # Prova prima con pynvml
-            import pynvml
             pynvml.nvmlInit()
             device_count = pynvml.nvmlDeviceGetCount()
             
@@ -174,9 +174,9 @@ class NvidiaAttestation:
             
             gpu_ready = self.verify_gpu_ready()
             if gpu_ready:
-                logger.info("✓ Attestation completata con successo")
+                logger.info("Attestation completata con successo")
             else:
-                logger.error("✗ GPU non pronta per ML workload")
+                logger.error("GPU non pronta per ML workload")
             
             return gpu_ready
             
@@ -205,9 +205,9 @@ if __name__ == "__main__":
         print(json.dumps(report, indent=2))
         
         if report['gpu_ready']:
-            print("\n✓ GPU pronta per ML workload")
+            print("\nGPU pronta per ML workload")
         else:
-            print("\n⚠ GPU non pronta")
+            print("\nGPU non pronta")
             
     except Exception as e:
         print(f"Errore: {e}")
