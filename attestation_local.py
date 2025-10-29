@@ -6,6 +6,7 @@ import json
 import subprocess
 import logging
 import pynvml
+from nv_attestation_sdk.attestation import Attestation
 from typing import Dict, Any, Optional
 
 # Setup logging
@@ -104,8 +105,6 @@ class NvidiaAttestation:
     def _try_advanced_attestation(self) -> Optional[Dict[str, Any]]:
         """Prova attestation avanzata con nv-attestation-sdk"""
         try:
-            from nv_attestation_sdk.attestation import Attestation
-            
             attestation = Attestation()
             evidence = attestation.get_evidence()
             
