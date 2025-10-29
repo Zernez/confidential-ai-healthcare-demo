@@ -29,18 +29,20 @@ class NvidiaAttestation:
         """
         try:
             # Ottieni l'attestazione dalla GPU
-            # Passa None come nonce invece di b""
-            evidence = attestation.Attestation().get_evidence(None)
-            print(f"[ATTESTATION] Tipo evidence: {type(evidence)}")
-            print(f"[ATTESTATION] Contenuto evidence: {evidence}")
+            result = attestation.Attestation().get_evidence(None)
+            print(f"[ATTESTATION] Tipo evidence: {type(result)}")
+            print(f"[ATTESTATION] Contenuto evidence: {result}")
+            if not result or not isinstance(result, tuple) or len(result) < 2:
+                raise RuntimeError("Evidence non valida restituita dall'SDK NVIDIA.")
+            nonce, evidence = result
             if not evidence:
-                raise RuntimeError("Evidence vuoto restituito dall'SDK NVIDIA.")
-            return evidence
+                raise RuntimeError("Evidence vuota restituita dall'SDK NVIDIA.")
+            return nonce, evidence
             
         except Exception as e:
             raise RuntimeError(f"Errore generando quote con NVIDIA SDK: {str(e)}")
 
-    def send_to_nas(self, evidence):
+    def send_to_nas(self, nonce, evidence):
         """
         Invia evidence al NVIDIA Remote Attestation Service (NRAS).
         
@@ -53,6 +55,7 @@ class NvidiaAttestation:
         try:
             # Converti evidence in formato inviabile
             payload = {
+                "nonce": nonce,
                 "evidence": evidence.hex() if isinstance(evidence, bytes) else str(evidence),
                 "arch": "HOPPER",  # H100 GPU architecture
                 "gpu_attestation": True
@@ -86,10 +89,10 @@ class NvidiaAttestation:
         print("[ATTESTATION] Avvio attestazione GPU NVIDIA con SDK...")
         
         try:
-            evidence = self.get_quote(nonce)
+            nonce, evidence = self.get_quote(nonce)
             print("[ATTESTATION] Evidence ottenuto, invio al NRAS...")
             
-            attestation_result = self.send_to_nas(evidence)
+            attestation_result = self.send_to_nas(nonce, evidence)
             print("[ATTESTATION] Risultato NRAS:")
             print(json.dumps(attestation_result, indent=2))
 
