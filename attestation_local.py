@@ -106,13 +106,18 @@ class NvidiaAttestation:
         """Prova attestation avanzata con nv-attestation-sdk"""
         try:
             attestation = Attestation()
+            # Aggiungi verifier locale come da guida NVIDIA
+            # OCSP_URL e RIM_URL possono essere stringhe vuote se non disponibili
+            attestation.add_verifier(
+                attestation.Devices.GPU,
+                attestation.Environment.LOCAL,
+                "", "", "", ""
+            )
             evidence = attestation.get_evidence()
-            
             return {
                 'evidence': evidence,
-                'nras_url': attestation.nras_url if hasattr(attestation, 'nras_url') else None
+                'nras_url': getattr(attestation, 'nras_url', None)
             }
-            
         except ImportError:
             logger.info("nv-attestation-sdk non disponibile")
             return None
