@@ -96,12 +96,25 @@ class NvidiaAttestation:
             print(json.dumps(attestation_result, indent=2))
 
             # Verifica il risultato
-            if attestation_result.get("status") == "success" or \
-               attestation_result.get("nras_validation", {}).get("verdict") == "pass":
-                print("[ATTESTATION] GPU in modalità confidential. OK.")
-                return True
+            # Se la risposta è bytes, decodifica e carica come JSON
+            if isinstance(attestation_result, bytes):
+                try:
+                    attestation_result = json.loads(attestation_result.decode())
+                except Exception as e:
+                    print(f"[ATTESTATION] Errore parsing risposta NRAS: {e}")
+                    return False
+
+            if isinstance(attestation_result, dict):
+                status = attestation_result.get("status")
+                verdict = attestation_result.get("nras_validation", {}).get("verdict")
+                if status == "success" or verdict == "pass":
+                    print("[ATTESTATION] GPU in modalità confidential. OK.")
+                    return True
+                else:
+                    print("[ATTESTATION] GPU NON in modalità confidential. FALLITA.")
+                    return False
             else:
-                print("[ATTESTATION] GPU NON in modalità confidential. FALLITA.")
+                print(f"[ATTESTATION] Risposta NRAS inattesa: {type(attestation_result)}")
                 return False
                 
         except Exception as e:
