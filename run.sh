@@ -19,9 +19,9 @@ fi
 
 echo "Avvio container con GPU..."
 
-# Mappa device speciali NVIDIA per confidential computing se presenti
+# Mappa tutti i device NVIDIA visibili
 EXTRA_DEVICES=""
-for DEV in /dev/nvidia-cc /dev/nvidia-uvm /dev/nvidia-uvm-tools; do
+for DEV in /dev/nvidia*; do
     if [ -e "$DEV" ]; then
         EXTRA_DEVICES="$EXTRA_DEVICES --device $DEV"
     fi
