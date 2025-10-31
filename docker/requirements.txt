@@ -3,7 +3,7 @@ requests==2.32.3
 scikit-learn
 numpy==2.2.6
 nv-attestation-sdk==2.6.3
-nvidia-ml-py==12.570.172
+nvidia-ml-py==12.550.52
 pynvml==13.0.1
 cupy-cuda13x==13.6.0
 cuda-python==12.9.4
