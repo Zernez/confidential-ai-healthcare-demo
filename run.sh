@@ -32,4 +32,4 @@ docker run --gpus all --name $CONTAINER_NAME \
     -w /app \
     $EXTRA_DEVICES \
     $IMAGE_NAME \
-    conda run -n rapids python main.py
+    conda run -n rapids-25.10 python main.py
