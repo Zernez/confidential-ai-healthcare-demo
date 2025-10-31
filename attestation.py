@@ -20,56 +20,54 @@ class NvidiaAttestation:
 
     def get_quote(self, nonce=None):
         """
-        Genera quote di attestazione usando NVIDIA Attestation SDK.
-        
-        Args:
-            nonce: Nonce opzionale per la richiesta (bytes o None)
-        
+        Genera quote di attestazione usando NVIDIA Attestation SDK (API aggiornata).
         Returns:
-            Evidence contenente quote, certificate chain e altri dati
+            evidence: lista di dict con certificate/evidence/arch
         """
         try:
-            # Ottieni l'attestazione dalla GPU
             client = attestation.Attestation()
-            client.add_verifier(attestation.Devices.GPU, attestation.Environment.REMOTE, self.nas_url, "")
+            # Usa stringhe letterali come da nuova API
+            client.add_verifier("GPU", "REMOTE", self.nas_url, "", "", "")
             result = client.get_evidence()
             print(f"[ATTESTATION] Tipo evidence: {type(result)}")
             print(f"[ATTESTATION] Contenuto evidence: {result}")
-            if not result or not isinstance(result, tuple) or len(result) < 2:
+            if not result or not isinstance(result, list) or len(result) == 0:
                 raise RuntimeError("Evidence non valida restituita dall'SDK NVIDIA.")
-            nonce, evidence = result
+            # Prendi il primo dict della lista
+            evidence_dict = result[0]
+            # Estrai evidence e certificate
+            evidence = evidence_dict.get("evidence")
+            certificate = evidence_dict.get("certificate")
+            arch = evidence_dict.get("arch")
             if not evidence:
                 raise RuntimeError("Evidence vuota restituita dall'SDK NVIDIA.")
-            return nonce, evidence
-            
+            # Non c'è più nonce, restituisci evidence e info
+            return evidence, certificate, arch
         except Exception as e:
             raise RuntimeError(f"Errore generando quote con NVIDIA SDK: {str(e)}")
 
-    def send_to_nas(self, nonce, evidence):
+    def send_to_nas(self, evidence, certificate, arch):
         """
         Invia evidence al NVIDIA Remote Attestation Service (NRAS).
-        
         Args:
-            evidence: Evidence object dall'SDK
-            
+            evidence: evidence string
+            certificate: certificate string
+            arch: GPU architecture
         Returns:
             Risultato dell'attestazione dal servizio NVIDIA
         """
         try:
-            # Converti evidence in formato inviabile
             payload = {
-                "nonce": nonce,
-                "evidence": evidence.hex() if isinstance(evidence, bytes) else str(evidence),
-                "arch": "HOPPER",  # H100 GPU architecture
+                "evidence": evidence,
+                "certificate": certificate,
+                "arch": arch,
                 "gpu_attestation": True
             }
-            
             response = requests.post(
                 self.nas_url,
                 json=payload,
                 headers={"Content-Type": "application/json"}
             )
-            
             if response.status_code == 200:
                 return response.json()
             else:
@@ -79,34 +77,19 @@ class NvidiaAttestation:
         except requests.RequestException as e:
             raise RuntimeError(f"Errore di rete verso NRAS: {e}")
 
-    def perform_attestation(self, nonce=None):
+    def perform_attestation(self):
         """
-        Esegue il processo completo di attestazione.
-        
-        Args:
-            nonce: Nonce opzionale per la richiesta
-            
+        Esegue il processo completo di attestazione (API aggiornata).
         Returns:
             True se attestazione riuscita, False altrimenti
         """
         print("[ATTESTATION] Avvio attestazione GPU NVIDIA con SDK...")
-        
         try:
-            nonce, evidence = self.get_quote(nonce)
+            evidence, certificate, arch = self.get_quote()
             print("[ATTESTATION] Evidence ottenuto, invio al NRAS...")
-            
-            attestation_result = self.send_to_nas(nonce, evidence)
+            attestation_result = self.send_to_nas(evidence, certificate, arch)
             print("[ATTESTATION] Risultato NRAS:")
             print(json.dumps(attestation_result, indent=2))
-
-            # Verifica il risultato
-            # Se la risposta è bytes, decodifica e carica come JSON
-            if isinstance(attestation_result, bytes):
-                try:
-                    attestation_result = json.loads(attestation_result.decode())
-                except Exception as e:
-                    print(f"[ATTESTATION] Errore parsing risposta NRAS: {e}")
-                    return False
 
             if isinstance(attestation_result, dict):
                 status = attestation_result.get("status")
@@ -120,7 +103,6 @@ class NvidiaAttestation:
             else:
                 print(f"[ATTESTATION] Risposta NRAS inattesa: {type(attestation_result)}")
                 return False
-                
         except Exception as e:
             print(f"[ATTESTATION] Errore durante attestazione: {str(e)}")
             print("[ATTESTATION] Fallback: eseguo attestazione locale semplificata...")
