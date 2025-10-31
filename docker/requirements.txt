@@ -1,7 +1,7 @@
 joblib==1.4.2
 requests==2.32.3
 scikit-learn
-numpy==2.3.3
+numpy==2.2.6
 nv-attestation-sdk==2.6.3
 nvidia-ml-py==13.580.82
 # pynvml==13.0.1
