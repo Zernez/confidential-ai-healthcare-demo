@@ -109,8 +109,8 @@ class NvidiaAttestation:
             # Aggiungi verifier locale come da guida NVIDIA
             # OCSP_URL e RIM_URL possono essere stringhe vuote se non disponibili
             attestation.add_verifier(
-                attestation.Devices.GPU,
-                attestation.Environment.LOCAL,
+                "GPU",
+                "LOCAL",
                 "", "", "", ""
             )
             evidence = attestation.get_evidence()

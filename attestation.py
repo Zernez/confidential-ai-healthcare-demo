@@ -26,8 +26,8 @@ class NvidiaAttestation:
         """
         try:
             client = attestation.Attestation()
-            # Usa stringhe letterali come da nuova API
-            client.add_verifier("GPU", "REMOTE", self.nas_url, "", "", "")
+            # Usa stringhe letterali come da nuova API ("NRAS" per il servizio remoto)
+            client.add_verifier("GPU", "NRAS", self.nas_url, "", "", "")
             result = client.get_evidence()
             print(f"[ATTESTATION] Tipo evidence: {type(result)}")
             print(f"[ATTESTATION] Contenuto evidence: {result}")
@@ -42,11 +42,11 @@ class NvidiaAttestation:
             if not evidence:
                 raise RuntimeError("Evidence vuota restituita dall'SDK NVIDIA.")
             # Non c'è più nonce, restituisci evidence e info
-            return evidence, certificate, arch
+            return evidence, certificate, arch, nonce
         except Exception as e:
             raise RuntimeError(f"Errore generando quote con NVIDIA SDK: {str(e)}")
 
-    def send_to_nas(self, evidence, certificate, arch):
+    def send_to_nas(self, evidence, certificate, arch, nonce):
         """
         Invia evidence al NVIDIA Remote Attestation Service (NRAS).
         Args:
@@ -58,6 +58,7 @@ class NvidiaAttestation:
         """
         try:
             payload = {
+                "nonce": nonce,
                 "evidence": evidence,
                 "certificate": certificate,
                 "arch": arch,
@@ -85,9 +86,9 @@ class NvidiaAttestation:
         """
         print("[ATTESTATION] Avvio attestazione GPU NVIDIA con SDK...")
         try:
-            evidence, certificate, arch = self.get_quote()
+            evidence, certificate, arch, nonce = self.get_quote()
             print("[ATTESTATION] Evidence ottenuto, invio al NRAS...")
-            attestation_result = self.send_to_nas(evidence, certificate, arch)
+            attestation_result = self.send_to_nas(evidence, certificate, arch, nonce)
             print("[ATTESTATION] Risultato NRAS:")
             print(json.dumps(attestation_result, indent=2))
 
