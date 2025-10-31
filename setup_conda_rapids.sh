@@ -34,7 +34,8 @@ fi
 conda create -n rapids-25.10 -c rapidsai -c conda-forge -c nvidia  \
     rapids=25.10 python=3.12 'cuda-version=13.0'
 
-conda install -c rapidsai -c conda-forge cudf=25.12 cuml=25.12 cuda-version=13.0
+conda install -c rapidsai -c conda-forge cudf=25.10 cuda-version=13.0
+conda install -c rapidsai -c conda-forge cuml=25.10 cuda-version=13.0
 
 # Installa requirements.txt con pip
 if [ -f "docker/requirements.txt" ]; then

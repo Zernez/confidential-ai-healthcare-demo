@@ -1,10 +1,10 @@
 joblib==1.4.2
 requests==2.32.3
 scikit-learn
-numpy==1.26.4
+numpy==2.3.3
 nv-attestation-sdk==2.6.3
-nvidia-ml-py==12.550.52
-#pynvml==13.0.1
-#cupy-cuda13x==13.6.0
-#cuda-python==12.9.4
+nvidia-ml-py==13.580.82
+# pynvml==13.0.1
+# cupy-cuda13x==13.6.0
+# cuda-python==12.9.4
 requests
