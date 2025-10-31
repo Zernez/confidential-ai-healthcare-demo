@@ -51,7 +51,7 @@ class NvidiaAttestation:
             logger.info("Prove raccolte con successo.")
 
             logger.info("Esecuzione dell'attestazione...")
-            attestation_passed = self.client.attest()
+            attestation_passed = self.client.attest([]) 
             logger.info(f"Risultato attestazione: {attestation_passed}")
 
             if not attestation_passed:
