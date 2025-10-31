@@ -36,6 +36,7 @@ COPY . /app
 
 # Optional: install any python-only requirements in the env
 COPY docker/requirements.txt /app/requirements.txt
+RUN conda init
 RUN conda activate rapids-25.10
 RUN pip install -r /app/requirements.txt
 #RUN conda run -n rapids-25.10 pip install -r /app/requirements.txt
