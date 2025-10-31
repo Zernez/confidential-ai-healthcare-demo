@@ -1,9 +1,6 @@
 #!/bin/bash
 set -e
 
-# Vai nella cartella del progetto
-cd /home/azureuser/project
-
 # Nome immagine e container
 IMAGE_NAME=conf-ai-demo
 CONTAINER_NAME=conf-ai-container
