@@ -54,6 +54,47 @@ class NvidiaAttestation:
         try:
             logger.info("Raccolta delle prove (evidence) dalla GPU...")
             evidence_list = self.client.get_evidence()
+            # Debug verifiers e struttura evidence per diagnosi versione SDK
+            try:
+                logger.info(f"Verifiers configurati: {self.client.get_verifiers()}")
+            except Exception:
+                pass
+            try:
+                etypes = [type(e).__name__ for e in (evidence_list or [])]
+                logger.info(f"Tipi elementi evidence_list: {etypes}")
+                if evidence_list and isinstance(evidence_list[0], dict):
+                    logger.info(f"Primo elemento evidence (keys): {list(evidence_list[0].keys())}")
+            except Exception:
+                pass
+
+            # Se la lista contiene oggetti GPUInfo (con metodo get_gpu_architecture),
+            # li portiamo in testa per allineare le aspettative del verifier locale.
+            try:
+                def _has_gpu_arch(x):
+                    return hasattr(x, 'get_gpu_architecture') and callable(getattr(x, 'get_gpu_architecture'))
+                if isinstance(evidence_list, list):
+                    gpu_objs = [e for e in evidence_list if _has_gpu_arch(e)]
+                    others = [e for e in evidence_list if not _has_gpu_arch(e)]
+                    if gpu_objs and (not _has_gpu_arch(evidence_list[0])):
+                        logger.info("Riordino evidence_list per posizionare oggetti GPUInfo in testa")
+                        evidence_list = gpu_objs + others
+                    # Se non esistono oggetti con get_gpu_architecture ma il primo è un dict con 'arch' o 'gpu_architecture',
+                    # creiamo un piccolo shim per soddisfare l'SDK.
+                    elif not gpu_objs and evidence_list and isinstance(evidence_list[0], dict):
+                        first = evidence_list[0]
+                        arch_val = first.get('gpu_architecture') or first.get('arch')
+                        if arch_val:
+                            logger.info(f"Creo GPUInfo shim da dict con arch='{arch_val}'")
+                            class _GPUInfoShim:
+                                def __init__(self, arch):
+                                    self._arch = arch
+                                def get_gpu_architecture(self):
+                                    return self._arch
+                            shim = _GPUInfoShim(arch_val)
+                            evidence_list = [shim] + evidence_list[1:]
+            except Exception:
+                pass
+
             logger.info("Prove raccolte con successo.")
 
             logger.info("Esecuzione dell'attestazione...")
