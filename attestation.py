@@ -18,7 +18,7 @@ class NvidiaAttestation:
                 "Installa con: pip install nv-attestation-sdk"
             )
 
-    def get_quote(self, nonce=None):
+    def get_quote(self):
         """
         Genera quote di attestazione usando NVIDIA Attestation SDK (API aggiornata).
         Returns:
@@ -26,8 +26,8 @@ class NvidiaAttestation:
         """
         try:
             client = attestation.Attestation()
-            # Specifichiamo esplicitamente il verifier per NRAS
-            client.add_verifier(attestation.Attestation.Verifiers.NRAS)
+            # Specifichiamo esplicitamente il verifier per NRAS come stringa
+            client.add_verifier("NRAS")
             
             # get_evidence() non accetta argomenti, restituisce nonce e lista evidence
             returned_nonce, evidence_list = client.get_evidence()
@@ -88,7 +88,8 @@ class NvidiaAttestation:
         """
         print("[ATTESTATION] Avvio attestazione GPU NVIDIA con SDK...")
         try:
-            evidence, certificate, arch, returned_nonce = self.get_quote(nonce)
+            # 'nonce' non è più passato come argomento a get_quote
+            evidence, certificate, arch, returned_nonce = self.get_quote()
             if not evidence:
                 # Se get_quote fallisce e restituisce evidence vuota, non procedere
                 raise RuntimeError("get_quote ha fallito e non ha restituito evidence.")

@@ -106,8 +106,8 @@ class NvidiaAttestation:
         """Prova attestation avanzata con nv-attestation-sdk"""
         try:
             client = Attestation()
-            # Specifichiamo esplicitamente il verifier per l'attestazione locale
-            client.add_verifier(Attestation.Verifiers.LOCAL)
+            # Specifichiamo esplicitamente il verifier per l'attestazione locale come stringa
+            client.add_verifier("LOCAL")
             
             # get_evidence() non accetta argomenti
             nonce, evidence = client.get_evidence()
