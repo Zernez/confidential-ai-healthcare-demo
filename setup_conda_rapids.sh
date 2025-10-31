@@ -27,7 +27,7 @@ conda activate rapids
 
 # Installa RAPIDS più recenti compatibili con Python 3.11
 echo "Installazione RAPIDS 24.04 (Python 3.11 + Numba recente)..."
-conda install -y -c rapidsai -c conda-forge -c nvidia cupy-cuda11x cubinlinker ptxcompiler
+conda install -y -c rapidsai -c conda-forge -c nvidia cubinlinker ptxcompiler
 conda install -y -c rapidsai -c conda-forge -c nvidia cudf=24.04 cuml=24.04
 
 # Installa requirements.txt con pip
