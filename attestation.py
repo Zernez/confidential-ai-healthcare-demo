@@ -24,7 +24,7 @@ class NvidiaAttestation:
         try:
             client = attestation.Attestation()
             client.set_nonce(secrets.token_hex(32))
-            client.add_verifier(attestation.Devices.GPU, attestation.Environments.REMOTE, self.nas_url, "")
+            client.add_verifier(attestation.Devices.GPU, attestation.Environment.REMOTE, self.nas_url, "")
             
             print("[ATTESTATION] Raccolta evidence per attestazione remota...")
             evidence_list = client.get_evidence()

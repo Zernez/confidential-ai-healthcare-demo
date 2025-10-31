@@ -35,7 +35,7 @@ class NvidiaAttestation:
         
         # Aggiunge il verifier per l'attestazione locale della GPU.
         # I parametri vuoti indicano che non si usano OCSP o RIM URL per questa attestazione locale.
-        self.client.add_verifier(attestation.Devices.GPU, attestation.Environments.LOCAL, "", "", "", "")
+        self.client.add_verifier(attestation.Devices.GPU, attestation.Environment.LOCAL, "", "", "", "")
         
         logger.info("NvidiaAttestation client inizializzato.")
         logger.info(f"Nonce: {self.nonce}")
