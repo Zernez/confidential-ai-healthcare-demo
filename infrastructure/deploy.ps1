@@ -1,5 +1,5 @@
 Param(
-  [string]$Account = "fernando.pannullo@collaboratore.uniparthenope.it",
+  [string]$Account = "cerictict@outlook.com",
   [string]$RegionPref = "",
   [string]$Rg = "rg-tdx-h100-dist",
   [string]$Vnet = "vnet-tdx-h100",
@@ -11,17 +11,17 @@ Param(
   [string]$VmGpu = "vm-h100-gpu",
   [string]$AdminUser = "azureuser",
   [string]$SizeCpu = "Standard_DCadsv6", #AMD SEV
-  [string]$SizeCpu = "Standard_DC2es_v6", #INTEL TDX
+  #[string]$SizeCpu = "Standard_DC2es_v6", #INTEL TDX
   [string]$SizeGpu = "Standard_NCC40ads_H100_v5",
   [string]$ImageCPU = "Canonical:0001-com-ubuntu-confidential-vm-jammy:22_04-lts-cvm:latest",
   [string]$ImageGPU = "Canonical:0001-com-ubuntu-confidential-vm-jammy:22_04-lts-cvm:latest"
 )
 
 # Login e subscription
-az login
+az login --tenant d50ba9fd-9d3d-4824-8205-e1eecec4a44b
 $subId = az account list --query "[?user.name=='$Account'].id" -o tsv
-if (-not $subId) { throw "Subscription per $Account non trovata" }
-az account set --subscription $subId
+#if (-not $subId) { throw "Subscription per $Account non trovata" }
+#az account set --subscription $subId
 
 # Regione
 $preferredRegions = if ($RegionPref) { @($RegionPref) } else { @("westeurope","northeurope","uksouth","switzerlandnorth","germanywestcentral") }
