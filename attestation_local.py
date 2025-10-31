@@ -33,15 +33,23 @@ class NvidiaAttestation:
         self.client.set_nonce(self.nonce)
         self.client.set_claims_version("3.0")
         
-        # Aggiunge il verifier per l'attestazione locale della GPU seguendo l'esempio ufficiale NVIDIA.
-        # Formato: add_verifier(Device, Environment.LOCAL, OCSP_URL, RIM_URL)
-        # Nota: non passare parametri extra (alcune versioni SDK si aspettano solo 4 argomenti per LOCAL).
-        self.client.add_verifier(
-            attestation.Devices.GPU,
-            attestation.Environment.LOCAL,
-            "",
-            "",
-        )
+        # Aggiunge il verifier per l'attestazione locale della GPU.
+        # Alcune versioni SDK si comportano meglio con None al posto di stringhe vuote.
+        try:
+            self.client.add_verifier(
+                attestation.Devices.GPU,
+                attestation.Environment.LOCAL,
+                None,
+                None,
+            )
+        except TypeError:
+            # Fallback alla firma con stringhe vuote (come nel sample ufficiale)
+            self.client.add_verifier(
+                attestation.Devices.GPU,
+                attestation.Environment.LOCAL,
+                "",
+                "",
+            )
         
         logger.info("NvidiaAttestation client inizializzato.")
         logger.info(f"Nonce: {self.nonce}")
@@ -67,33 +75,38 @@ class NvidiaAttestation:
             except Exception:
                 pass
 
-            # Se la lista contiene oggetti GPUInfo (con metodo get_gpu_architecture),
-            # li portiamo in testa per allineare le aspettative del verifier locale.
-            try:
-                def _has_gpu_arch(x):
-                    return hasattr(x, 'get_gpu_architecture') and callable(getattr(x, 'get_gpu_architecture'))
-                if isinstance(evidence_list, list):
-                    gpu_objs = [e for e in evidence_list if _has_gpu_arch(e)]
-                    others = [e for e in evidence_list if not _has_gpu_arch(e)]
-                    if gpu_objs and (not _has_gpu_arch(evidence_list[0])):
-                        logger.info("Riordino evidence_list per posizionare oggetti GPUInfo in testa")
-                        evidence_list = gpu_objs + others
-                    # Se non esistono oggetti con get_gpu_architecture ma il primo è un dict con 'arch' o 'gpu_architecture',
-                    # creiamo un piccolo shim per soddisfare l'SDK.
-                    elif not gpu_objs and evidence_list and isinstance(evidence_list[0], dict):
-                        first = evidence_list[0]
-                        arch_val = first.get('gpu_architecture') or first.get('arch')
-                        if arch_val:
-                            logger.info(f"Creo GPUInfo shim da dict con arch='{arch_val}'")
-                            class _GPUInfoShim:
-                                def __init__(self, arch):
-                                    self._arch = arch
-                                def get_gpu_architecture(self):
-                                    return self._arch
-                            shim = _GPUInfoShim(arch_val)
-                            evidence_list = [shim] + evidence_list[1:]
-            except Exception:
-                pass
+            # Se vediamo evidence in formato remoto (dict con certificate/evidence/arch),
+            # re-inizializziamo il client forzando un verifier strettamente locale
+            # e riproviamo una sola volta con None/None (poi con "","" come fallback).
+            if evidence_list and isinstance(evidence_list[0], dict) and {'certificate','evidence'} <= set(evidence_list[0].keys()):
+                logger.warning("Evidence in formato remoto rilevata durante attestazione locale; reinizializzo client in modalita' LOCAL-only")
+                def _init_local_only(use_none: bool):
+                    c = attestation.Attestation()
+                    c.set_name("local_gpu_node")
+                    c.set_nonce(self.nonce)
+                    c.set_claims_version("3.0")
+                    if use_none:
+                        c.add_verifier(attestation.Devices.GPU, attestation.Environment.LOCAL, None, None)
+                    else:
+                        c.add_verifier(attestation.Devices.GPU, attestation.Environment.LOCAL, "", "")
+                    return c
+                # prova con None/None
+                self.client = _init_local_only(True)
+                evidence_list = self.client.get_evidence()
+                try:
+                    etypes = [type(e).__name__ for e in (evidence_list or [])]
+                    logger.info(f"(Retry) Tipi elementi evidence_list: {etypes}")
+                except Exception:
+                    pass
+                if evidence_list and isinstance(evidence_list[0], dict) and {'certificate','evidence'} <= set(evidence_list[0].keys()):
+                    # fallback a "",""
+                    self.client = _init_local_only(False)
+                    evidence_list = self.client.get_evidence()
+                    try:
+                        etypes = [type(e).__name__ for e in (evidence_list or [])]
+                        logger.info(f"(Retry2) Tipi elementi evidence_list: {etypes}")
+                    except Exception:
+                        pass
 
             logger.info("Prove raccolte con successo.")
 
