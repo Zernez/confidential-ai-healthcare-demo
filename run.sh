@@ -24,6 +24,7 @@ for DEV in /dev/nvidia*; do
     fi
 done
 
+source /opt/conda/etc/profile.d/conda.sh
 conda activate rapids-25.10
 
 # Esegui attestazione sull'host prima di avviare il container
