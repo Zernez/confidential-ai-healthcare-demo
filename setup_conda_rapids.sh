@@ -20,15 +20,21 @@ if conda info --envs | grep -q rapids; then
 fi
 
 # Crea ambiente RAPIDS con Python 3.11 (più recente e stabile)
-echo "Creazione ambiente rapids con Python 3.11..."
-conda create -y -n rapids python=3.11
-source $(conda info --base)/etc/profile.d/conda.sh
-conda activate rapids
+# echo "Creazione ambiente rapids con Python 3.11..."
+# conda create -y -n rapids python=3.11
+# source $(conda info --base)/etc/profile.d/conda.sh
+# conda activate rapids
 
 # Installa RAPIDS più recenti compatibili con Python 3.11
-echo "Installazione RAPIDS 24.04 (Python 3.11 + Numba recente)..."
-conda install -y -c rapidsai -c conda-forge -c nvidia cubinlinker ptxcompiler
-conda install -y -c rapidsai -c conda-forge -c nvidia cudf=25.10 cuml=25.10
+# echo "Installazione RAPIDS 24.04 (Python 3.11 + Numba recente)..."
+# conda install -y -c rapidsai -c conda-forge -c nvidia cubinlinker ptxcompiler
+# conda install -y -c rapidsai -c conda-forge -c nvidia cudf=24.04 cuml=24.04
+
+# Crea ambiente RAPIDS con Python 3.11 (più recente e stabile)
+conda create -n rapids-25.10 -c rapidsai -c conda-forge -c nvidia  \
+    rapids=25.10 python=3.12 'cuda-version=13.0'
+
+conda install -c rapidsai -c conda-forge cudf=25.12 cuml=25.12 cuda-version=13.0
 
 # Installa requirements.txt con pip
 if [ -f "docker/requirements.txt" ]; then
