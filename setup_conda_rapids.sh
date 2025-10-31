@@ -28,12 +28,12 @@ conda activate rapids
 # Installa RAPIDS più recenti compatibili con Python 3.11
 echo "Installazione RAPIDS 24.04 (Python 3.11 + Numba recente)..."
 conda install -y -c rapidsai -c conda-forge -c nvidia cubinlinker ptxcompiler
-conda install -y -c rapidsai -c conda-forge -c nvidia cudf=24.04 cuml=24.04
+conda install -y -c rapidsai -c conda-forge -c nvidia cudf=25.10 cuml=25.10
 
 # Installa requirements.txt con pip
-# if [ -f "docker/requirements.txt" ]; then
-#     echo "Installazione dipendenze da requirements.txt..."
-#     pip install -r docker/requirements.txt
-# fi
+if [ -f "docker/requirements.txt" ]; then
+    echo "Installazione dipendenze da requirements.txt..."
+    pip install -r docker/requirements.txt
+fi
 
 echo "Ambiente rapids pronto! Ora puoi eseguire run_local.sh."
