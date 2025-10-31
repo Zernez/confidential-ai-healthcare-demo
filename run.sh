@@ -24,9 +24,6 @@ for DEV in /dev/nvidia*; do
     fi
 done
 
-source /opt/conda/etc/profile.d/conda.sh
-conda activate rapids-25.10
-
 # Esegui attestazione sull'host prima di avviare il container
 python3 attestation.py || { echo "Attestazione fallita sull'host. Blocco esecuzione."; exit 1; }
 
