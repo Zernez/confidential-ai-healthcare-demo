@@ -27,7 +27,7 @@ class NvidiaAttestation:
         try:
             client = attestation.Attestation()
             # Specifichiamo esplicitamente il verifier per NRAS come stringa
-            client.add_verifier("NRAS")
+            client.add_verifier(attestation.Devices.GPU, attestation.Environment.REMOTE, self.nas_url, "")
             
             # get_evidence() non accetta argomenti, restituisce nonce e lista evidence
             returned_nonce, evidence_list = client.get_evidence()
