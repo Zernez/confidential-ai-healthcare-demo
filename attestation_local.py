@@ -33,9 +33,15 @@ class NvidiaAttestation:
         self.client.set_nonce(self.nonce)
         self.client.set_claims_version("3.0")
         
-        # Aggiunge il verifier per l'attestazione locale della GPU.
-        # I parametri vuoti indicano che non si usano OCSP o RIM URL per questa attestazione locale.
-        self.client.add_verifier(attestation.Devices.GPU, attestation.Environment.LOCAL, "", "", "", "")
+        # Aggiunge il verifier per l'attestazione locale della GPU seguendo l'esempio ufficiale NVIDIA.
+        # Formato: add_verifier(Device, Environment.LOCAL, OCSP_URL, RIM_URL)
+        # Nota: non passare parametri extra (alcune versioni SDK si aspettano solo 4 argomenti per LOCAL).
+        self.client.add_verifier(
+            attestation.Devices.GPU,
+            attestation.Environment.LOCAL,
+            "",
+            "",
+        )
         
         logger.info("NvidiaAttestation client inizializzato.")
         logger.info(f"Nonce: {self.nonce}")
@@ -99,8 +105,13 @@ class NvidiaAttestation:
             
             logger.info(f"Validazione del token con la policy: {policy_path}")
             
-            # Il metodo validate_token del client accetta la policy e il token come stringhe
-            is_valid = self.client.validate_token(policy, token)
+            # Alcune versioni dell'SDK accettano solo (policy) e usano l'ultimo token interno;
+            # altre accettano (policy, token). Proviamo prima con la firma a un argomento.
+            try:
+                is_valid = self.client.validate_token(policy)
+            except TypeError:
+                # Fallback: versione SDK che richiede anche il token
+                is_valid = self.client.validate_token(policy, token)
             
             logger.info(f"Risultato validazione: {is_valid}")
             return is_valid
