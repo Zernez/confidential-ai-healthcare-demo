@@ -47,11 +47,11 @@ class NvidiaAttestation:
         """
         try:
             logger.info("Raccolta delle prove (evidence) dalla GPU...")
-            evidence_list = self.client.get_evidence()
+            self.client.get_evidence()
             logger.info("Prove raccolte con successo.")
 
             logger.info("Esecuzione dell'attestazione...")
-            attestation_passed = self.client.attest(evidence_list)
+            attestation_passed = self.client.attest()
             logger.info(f"Risultato attestazione: {attestation_passed}")
 
             if not attestation_passed:
