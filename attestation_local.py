@@ -106,13 +106,7 @@ class NvidiaAttestation:
         """Prova attestation avanzata con nv-attestation-sdk"""
         try:
             attestation = Attestation()
-            # Aggiungi verifier locale come da guida NVIDIA
-            # OCSP_URL e RIM_URL possono essere stringhe vuote se non disponibili
-            attestation.add_verifier(
-                "GPU",
-                "LOCAL",
-                "", "", "", ""
-            )
+            # Non usiamo add_verifier, lasciamo che l'SDK gestisca i default.
             evidence = attestation.get_evidence()
             return {
                 'evidence': evidence,

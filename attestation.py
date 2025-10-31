@@ -26,23 +26,30 @@ class NvidiaAttestation:
         """
         try:
             client = attestation.Attestation()
-            # Usa stringhe letterali come da nuova API ("NRAS" per il servizio remoto)
-            client.add_verifier("GPU", "NRAS", self.nas_url, "", "", "")
-            result = client.get_evidence()
+            # Non usiamo add_verifier, lasciamo che l'SDK gestisca i default.
+            # Passiamo il nonce direttamente a get_evidence.
+            result = client.get_evidence(nonce=nonce)
             print(f"[ATTESTATION] Tipo evidence: {type(result)}")
             print(f"[ATTESTATION] Contenuto evidence: {result}")
-            if not result or not isinstance(result, list) or len(result) == 0:
-                raise RuntimeError("Evidence non valida restituita dall'SDK NVIDIA.")
-            # Prendi il primo dict della lista
-            evidence_dict = result[0]
-            # Estrai evidence e certificate
+
+            if not result or not isinstance(result, tuple) or len(result) < 2 or not result[0]:
+                # Se il risultato è (False, []) o simile, l'attestazione è fallita
+                raise RuntimeError("Evidence non valida o attestazione fallita dall'SDK NVIDIA.")
+
+            # La nuova API potrebbe restituire (nonce, evidence_list)
+            returned_nonce, evidence_list = result
+            if not evidence_list or not isinstance(evidence_list, list) or len(evidence_list) == 0:
+                raise RuntimeError("Lista evidence vuota restituita dall'SDK NVIDIA.")
+
+            evidence_dict = evidence_list[0]
             evidence = evidence_dict.get("evidence")
             certificate = evidence_dict.get("certificate")
             arch = evidence_dict.get("arch")
+
             if not evidence:
-                raise RuntimeError("Evidence vuota restituita dall'SDK NVIDIA.")
-            # Non c'è più nonce, restituisci evidence e info
-            return evidence, certificate, arch, nonce
+                raise RuntimeError("Evidence vuota nel dizionario restituito dall'SDK.")
+
+            return evidence, certificate, arch, returned_nonce
         except Exception as e:
             raise RuntimeError(f"Errore generando quote con NVIDIA SDK: {str(e)}")
 
@@ -78,7 +85,7 @@ class NvidiaAttestation:
         except requests.RequestException as e:
             raise RuntimeError(f"Errore di rete verso NRAS: {e}")
 
-    def perform_attestation(self):
+    def perform_attestation(self, nonce=None):
         """
         Esegue il processo completo di attestazione (API aggiornata).
         Returns:
@@ -86,9 +93,9 @@ class NvidiaAttestation:
         """
         print("[ATTESTATION] Avvio attestazione GPU NVIDIA con SDK...")
         try:
-            evidence, certificate, arch, nonce = self.get_quote()
+            evidence, certificate, arch, returned_nonce = self.get_quote(nonce)
             print("[ATTESTATION] Evidence ottenuto, invio al NRAS...")
-            attestation_result = self.send_to_nas(evidence, certificate, arch, nonce)
+            attestation_result = self.send_to_nas(evidence, certificate, arch, returned_nonce)
             print("[ATTESTATION] Risultato NRAS:")
             print(json.dumps(attestation_result, indent=2))
 

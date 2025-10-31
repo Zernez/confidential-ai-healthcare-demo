@@ -31,13 +31,9 @@ RUN conda create -y -n rapids-25.10 -c rapidsai -c conda-forge -c nvidia \
 
 WORKDIR /app
 
-# Copy project
-COPY . /app
-
-# Optional: install any python-only requirements in the env
-
 COPY docker/requirements.txt /app/requirements.txt
 RUN conda run -n rapids-25.10 pip install -r /app/requirements.txt
 
-# Default command: run main in RAPIDS env
-#CMD ["conda", "run", "-n", "rapids-25.10", "python", "main.py"]
+# Copy project
+COPY . /app
+
