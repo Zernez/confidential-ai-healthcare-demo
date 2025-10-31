@@ -33,23 +33,15 @@ class NvidiaAttestation:
         self.client.set_nonce(self.nonce)
         self.client.set_claims_version("3.0")
         
-        # Aggiunge il verifier per l'attestazione locale della GPU.
-        # Alcune versioni SDK si comportano meglio con None al posto di stringhe vuote.
-        try:
-            self.client.add_verifier(
-                attestation.Devices.GPU,
-                attestation.Environment.LOCAL,
-                None,
-                None,
-            )
-        except TypeError:
-            # Fallback alla firma con stringhe vuote (come nel sample ufficiale)
-            self.client.add_verifier(
-                attestation.Devices.GPU,
-                attestation.Environment.LOCAL,
-                "",
-                "",
-            )
+        # Aggiunge il verifier per l'attestazione locale della GPU seguendo l'esempio ufficiale NVIDIA.
+        # Formato: add_verifier(Device, Environment.LOCAL, OCSP_URL, RIM_URL)
+        # Nota: non passare parametri extra (alcune versioni SDK si aspettano solo 4 argomenti per LOCAL).
+        self.client.add_verifier(
+            attestation.Devices.GPU,
+            attestation.Environment.LOCAL,
+            "",
+            "",
+        )
         
         logger.info("NvidiaAttestation client inizializzato.")
         logger.info(f"Nonce: {self.nonce}")
@@ -62,52 +54,6 @@ class NvidiaAttestation:
         try:
             logger.info("Raccolta delle prove (evidence) dalla GPU...")
             evidence_list = self.client.get_evidence()
-            # Debug verifiers e struttura evidence per diagnosi versione SDK
-            try:
-                logger.info(f"Verifiers configurati: {self.client.get_verifiers()}")
-            except Exception:
-                pass
-            try:
-                etypes = [type(e).__name__ for e in (evidence_list or [])]
-                logger.info(f"Tipi elementi evidence_list: {etypes}")
-                if evidence_list and isinstance(evidence_list[0], dict):
-                    logger.info(f"Primo elemento evidence (keys): {list(evidence_list[0].keys())}")
-            except Exception:
-                pass
-
-            # Se vediamo evidence in formato remoto (dict con certificate/evidence/arch),
-            # re-inizializziamo il client forzando un verifier strettamente locale
-            # e riproviamo una sola volta con None/None (poi con "","" come fallback).
-            if evidence_list and isinstance(evidence_list[0], dict) and {'certificate','evidence'} <= set(evidence_list[0].keys()):
-                logger.warning("Evidence in formato remoto rilevata durante attestazione locale; reinizializzo client in modalita' LOCAL-only")
-                def _init_local_only(use_none: bool):
-                    c = attestation.Attestation()
-                    c.set_name("local_gpu_node")
-                    c.set_nonce(self.nonce)
-                    c.set_claims_version("3.0")
-                    if use_none:
-                        c.add_verifier(attestation.Devices.GPU, attestation.Environment.LOCAL, None, None)
-                    else:
-                        c.add_verifier(attestation.Devices.GPU, attestation.Environment.LOCAL, "", "")
-                    return c
-                # prova con None/None
-                self.client = _init_local_only(True)
-                evidence_list = self.client.get_evidence()
-                try:
-                    etypes = [type(e).__name__ for e in (evidence_list or [])]
-                    logger.info(f"(Retry) Tipi elementi evidence_list: {etypes}")
-                except Exception:
-                    pass
-                if evidence_list and isinstance(evidence_list[0], dict) and {'certificate','evidence'} <= set(evidence_list[0].keys()):
-                    # fallback a "",""
-                    self.client = _init_local_only(False)
-                    evidence_list = self.client.get_evidence()
-                    try:
-                        etypes = [type(e).__name__ for e in (evidence_list or [])]
-                        logger.info(f"(Retry2) Tipi elementi evidence_list: {etypes}")
-                    except Exception:
-                        pass
-
             logger.info("Prove raccolte con successo.")
 
             logger.info("Esecuzione dell'attestazione...")
