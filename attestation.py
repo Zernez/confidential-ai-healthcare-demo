@@ -26,18 +26,13 @@ class NvidiaAttestation:
         """
         try:
             client = attestation.Attestation()
-            # Non usiamo add_verifier, lasciamo che l'SDK gestisca i default.
-            # Passiamo il nonce direttamente a get_evidence.
-            result = client.get_evidence(nonce=nonce)
-            print(f"[ATTESTATION] Tipo evidence: {type(result)}")
-            print(f"[ATTESTATION] Contenuto evidence: {result}")
+            # Specifichiamo esplicitamente il verifier per NRAS
+            client.add_verifier(attestation.Attestation.Verifiers.NRAS)
+            
+            # get_evidence() non accetta argomenti, restituisce nonce e lista evidence
+            returned_nonce, evidence_list = client.get_evidence()
+            print(f"[ATTESTATION] Contenuto evidence: {(returned_nonce, evidence_list)}")
 
-            if not result or not isinstance(result, tuple) or len(result) < 2 or not result[0]:
-                # Se il risultato è (False, []) o simile, l'attestazione è fallita
-                raise RuntimeError("Evidence non valida o attestazione fallita dall'SDK NVIDIA.")
-
-            # La nuova API potrebbe restituire (nonce, evidence_list)
-            returned_nonce, evidence_list = result
             if not evidence_list or not isinstance(evidence_list, list) or len(evidence_list) == 0:
                 raise RuntimeError("Lista evidence vuota restituita dall'SDK NVIDIA.")
 
@@ -94,6 +89,9 @@ class NvidiaAttestation:
         print("[ATTESTATION] Avvio attestazione GPU NVIDIA con SDK...")
         try:
             evidence, certificate, arch, returned_nonce = self.get_quote(nonce)
+            if not evidence:
+                # Se get_quote fallisce e restituisce evidence vuota, non procedere
+                raise RuntimeError("get_quote ha fallito e non ha restituito evidence.")
             print("[ATTESTATION] Evidence ottenuto, invio al NRAS...")
             attestation_result = self.send_to_nas(evidence, certificate, arch, returned_nonce)
             print("[ATTESTATION] Risultato NRAS:")
