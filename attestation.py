@@ -1,131 +1,89 @@
-import requests
 import json
+import sys
+import secrets
 from nv_attestation_sdk import attestation
 from attestation_local import NvidiaAttestation as LocalAttestation
-import sys
 
 class NvidiaAttestation:
     """
-    Gestione attestazione NVIDIA Confidential Computing su GPU H100.
-    Usa NVIDIA Attestation SDK per generare quote di attestazione.
+    Gestione attestazione NVIDIA. Esegue sia l'attestazione remota (vs NRAS)
+    che locale, in modo non bloccante.
     """
 
     def __init__(self, nas_url="https://nras.attestation.nvidia.com/v3/attest/gpu"):
         self.nas_url = nas_url
         if attestation is None:
-            raise ImportError(
-                "NVIDIA Attestation SDK non trovato. "
-                "Installa con: pip install nv-attestation-sdk"
-            )
+            raise ImportError("NVIDIA Attestation SDK non trovato.")
 
-    def get_quote(self):
+    def _perform_remote_attestation(self) -> bool:
         """
-        Genera quote di attestazione usando NVIDIA Attestation SDK (API aggiornata).
-        Returns:
-            evidence: lista di dict con certificate/evidence/arch
+        Esegue l'attestazione remota seguendo l'esempio ufficiale NVIDIA.
+        L'SDK gestisce la comunicazione con NRAS.
         """
+        print("\n[ATTESTATION] Avvio attestazione REMOTA GPU NVIDIA...")
         try:
             client = attestation.Attestation()
-            # Specifichiamo esplicitamente il verifier per NRAS come stringa
-            client.add_verifier(attestation.Devices.GPU, attestation.Environment.REMOTE, self.nas_url, "")
+            client.set_nonce(secrets.token_hex(32))
+            client.add_verifier(attestation.Devices.GPU, attestation.Environments.REMOTE, self.nas_url, "")
             
-            # get_evidence() non accetta argomenti, restituisce nonce e lista evidence
-            returned_nonce, evidence_list = client.get_evidence()
-            print(f"[ATTESTATION] Contenuto evidence: {(returned_nonce, evidence_list)}")
-
-            if not evidence_list or not isinstance(evidence_list, list) or len(evidence_list) == 0:
-                raise RuntimeError("Lista evidence vuota restituita dall'SDK NVIDIA.")
-
-            evidence_dict = evidence_list[0]
-            evidence = evidence_dict.get("evidence")
-            certificate = evidence_dict.get("certificate")
-            arch = evidence_dict.get("arch")
-
-            if not evidence:
-                raise RuntimeError("Evidence vuota nel dizionario restituito dall'SDK.")
-
-            return evidence, certificate, arch, returned_nonce
-        except Exception as e:
-            raise RuntimeError(f"Errore generando quote con NVIDIA SDK: {str(e)}")
-
-    def send_to_nas(self, evidence, certificate, arch, nonce):
-        """
-        Invia evidence al NVIDIA Remote Attestation Service (NRAS).
-        Args:
-            evidence: evidence string
-            certificate: certificate string
-            arch: GPU architecture
-        Returns:
-            Risultato dell'attestazione dal servizio NVIDIA
-        """
-        try:
-            payload = {
-                "nonce": nonce,
-                "evidence": evidence,
-                "certificate": certificate,
-                "arch": arch,
-                "gpu_attestation": True
-            }
-            response = requests.post(
-                self.nas_url,
-                json=payload,
-                headers={"Content-Type": "application/json"}
-            )
-            if response.status_code == 200:
-                return response.json()
+            print("[ATTESTATION] Raccolta evidence per attestazione remota...")
+            evidence_list = client.get_evidence()
+            
+            print("[ATTESTATION] Invio evidence al servizio NRAS e attesa verdetto...")
+            attestation_result = client.attest(evidence_list)
+            
+            if attestation_result:
+                print("[ATTESTATION] VERDETTO REMOTO: Successo. La GPU è attestata da NVIDIA.")
+                # Opzionale: ottenere il token se necessario
+                # token = client.get_token()
+                # print(f"[ATTESTATION] Token remoto: {token[:30]}...")
             else:
-                raise RuntimeError(
-                    f"NRAS errore: {response.status_code} {response.text}"
-                )
-        except requests.RequestException as e:
-            raise RuntimeError(f"Errore di rete verso NRAS: {e}")
+                print("[ATTESTATION] VERDETTO REMOTO: Fallimento.")
 
-    def perform_attestation(self, nonce=None):
-        """
-        Esegue il processo completo di attestazione (API aggiornata).
-        Returns:
-            True se attestazione riuscita, False altrimenti
-        """
-        print("[ATTESTATION] Avvio attestazione GPU NVIDIA con SDK...")
-        try:
-            # 'nonce' non è più passato come argomento a get_quote
-            evidence, certificate, arch, returned_nonce = self.get_quote()
-            if not evidence:
-                # Se get_quote fallisce e restituisce evidence vuota, non procedere
-                raise RuntimeError("get_quote ha fallito e non ha restituito evidence.")
-            print("[ATTESTATION] Evidence ottenuto, invio al NRAS...")
-            attestation_result = self.send_to_nas(evidence, certificate, arch, returned_nonce)
-            print("[ATTESTATION] Risultato NRAS:")
-            print(json.dumps(attestation_result, indent=2))
-
-            if isinstance(attestation_result, dict):
-                status = attestation_result.get("status")
-                verdict = attestation_result.get("nras_validation", {}).get("verdict")
-                if status == "success" or verdict == "pass":
-                    print("[ATTESTATION] GPU in modalità confidential. OK.")
-                    return True
-                else:
-                    print("[ATTESTATION] GPU NON in modalità confidential. FALLITA.")
-                    return False
-            else:
-                print(f"[ATTESTATION] Risposta NRAS inattesa: {type(attestation_result)}")
-                return False
+            return attestation_result
+        
         except Exception as e:
-            print(f"[ATTESTATION] Errore durante attestazione: {str(e)}")
-            print("[ATTESTATION] Fallback: eseguo attestazione locale semplificata...")
-            try:
-                simple_attestor = LocalAttestation()
-                success = simple_attestor.perform_attestation()
-                if success:
-                    print("[ATTESTATION] Attestazione locale semplificata OK.")
-                else:
-                    print("[ATTESTATION] Attestazione locale semplificata FALLITA.")
-                return success
-            except Exception as e2:
-                print(f"[ATTESTATION] Errore nel fallback locale: {e2}")
-                return False
+            print(f"[ATTESTATION] ERRORE REMOTO: {str(e)}")
+            return False
+
+    def _perform_local_attestation(self) -> bool:
+        """
+        Esegue l'attestazione locale.
+        """
+        print("\n[ATTESTATION] Avvio attestazione LOCALE GPU NVIDIA...")
+        try:
+            local_attestor = LocalAttestation()
+            success = local_attestor.perform_attestation()
+            if success:
+                print("[ATTESTATION] VERDETTO LOCALE: Successo.")
+            else:
+                print("[ATTESTATION] VERDETTO LOCALE: Fallimento.")
+            return success
+        
+        except Exception as e:
+            print(f"[ATTESTATION] ERRORE LOCALE: {e}")
+            return False
+
+    def perform_attestation(self):
+        """
+        Orchestra l'esecuzione di entrambe le attestazioni in modo non bloccante.
+        """
+        remote_success = self._perform_remote_attestation()
+        local_success = self._perform_local_attestation()
+
+        print("\n[ATTESTATION] Riepilogo:")
+        print(f"- Attestazione Remota (NRAS): {'OK' if remote_success else 'FALLITA'}")
+        print(f"- Attestazione Locale:        {'OK' if local_success else 'FALLITA'}")
+        
+        # La funzione non è bloccante e non restituisce un valore di successo aggregato,
+        # ma stampa solo i risultati come richiesto.
+        return True
+
 
 if __name__ == "__main__":
+    print("=== Inizio Processo di Attestazione GPU ===")
     attestor = NvidiaAttestation()
-    success = attestor.perform_attestation()
-    sys.exit(0 if success else 1)
+    attestor.perform_attestation()
+    print("\n=== Processo di Attestazione Completato ===")
+    # Esce con 0 per indicare che lo script è stato eseguito, come da richiesta non bloccante.
+    sys.exit(0)
