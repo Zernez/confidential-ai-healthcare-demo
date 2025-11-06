@@ -215,18 +215,6 @@ impl DecisionTree {
             }
         }
         Ok(*root.unwrap())
-        let mut left_node = None;
-        let mut right_node = None;
-        while let Some((l_idx, r_idx, d)) = stack.pop() {
-            left_node = Some(Box::new(self.build_tree_gpu(data, labels, &l_idx, n_features, d, gpu_trainer, rng).await?));
-            right_node = Some(Box::new(self.build_tree_gpu(data, labels, &r_idx, n_features, d, gpu_trainer, rng).await?));
-        }
-        Ok(TreeNode::Internal {
-            feature_idx: best_feature,
-            threshold: best_threshold,
-            left: left_node.unwrap(),
-            right: right_node.unwrap(),
-        })
     }
     
     async fn find_best_split_gpu(
