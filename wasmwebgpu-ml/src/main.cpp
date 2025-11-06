@@ -1,0 +1,192 @@
+/**
+ * @file main.cpp
+ * @brief WASM ML Benchmark - Diabetes Prediction (C++ + wasi:webgpu)
+ * 
+ * This program replicates the Python ML pipeline:
+ * 1. Load training data from CSV
+ * 2. Train RandomForest (200 trees, depth 16)
+ * 3. Save model
+ * 4. Load test data from CSV
+ * 5. Load model
+ * 6. Predict on test set
+ * 7. Calculate and print MSE
+ */
+
+#include <iostream>
+#include <fstream>
+#include <vector>
+#include <cmath>
+#include <iomanip>
+#include <chrono>
+
+#include "dataset.hpp"
+#include "random_forest.hpp"
+#include "gpu_executor.hpp"
+
+// Model parameters - MUST match Python configuration
+constexpr size_t N_ESTIMATORS = 200;
+constexpr size_t MAX_DEPTH = 16;
+constexpr size_t N_FEATURES = 10;
+const std::string MODEL_PATH = "data/model_diabetes_cpp.json";
+const std::string TRAIN_CSV = "data/diabetes_train.csv";
+const std::string TEST_CSV = "data/diabetes_test.csv";
+
+/**
+ * @brief Calculate Mean Squared Error
+ */
+float calculate_mse(const std::vector<float>& predictions, 
+                   const std::vector<float>& actual) {
+    if (predictions.size() != actual.size()) {
+        throw std::invalid_argument("Prediction and actual length mismatch");
+    }
+    
+    float sum = 0.0f;
+    for (size_t i = 0; i < predictions.size(); ++i) {
+        float diff = predictions[i] - actual[i];
+        sum += diff * diff;
+    }
+    
+    return sum / predictions.size();
+}
+
+/**
+ * @brief Training phase - matches train_model.py
+ */
+void train_and_save() {
+    std::cout << "\n=== TRAINING PHASE ===\n" << std::endl;
+    
+    // Load training data
+    auto train_dataset = ml::Dataset::from_csv(TRAIN_CSV, N_FEATURES);
+    
+    std::cout << "[TRAINING] Dataset loaded: " 
+              << train_dataset.size() << " samples, "
+              << train_dataset.n_features() << " features" << std::endl;
+    
+    // Create and train RandomForest
+    std::cout << "[TRAINING] Creating RandomForest with " << N_ESTIMATORS 
+              << " estimators, max_depth " << MAX_DEPTH << std::endl;
+    
+    ml::RandomForest rf(N_ESTIMATORS, MAX_DEPTH);
+    
+    // Try GPU training if available, otherwise CPU
+    ml::GpuExecutor gpu;
+    
+    auto start = std::chrono::high_resolution_clock::now();
+    
+    if (gpu.is_available()) {
+        std::cout << "[TRAINING] Starting GPU training..." << std::endl;
+        rf.train_gpu(train_dataset, gpu);
+    } else {
+        std::cout << "[TRAINING] GPU not available, starting CPU training..." << std::endl;
+        std::cout << "[TRAINING] (this may take a while)..." << std::endl;
+        rf.train_cpu(train_dataset);
+    }
+    
+    auto end = std::chrono::high_resolution_clock::now();
+    auto duration = std::chrono::duration_cast<std::chrono::milliseconds>(end - start);
+    
+    std::cout << "[TRAINING] Training completed in " 
+              << duration.count() << " ms!" << std::endl;
+    
+    // Serialize and save model
+    std::string model_json = rf.to_json();
+    
+    std::ofstream out(MODEL_PATH);
+    if (!out) {
+        throw std::runtime_error("Cannot write model file: " + MODEL_PATH);
+    }
+    out << model_json;
+    out.close();
+    
+    std::cout << "[TRAINING] Model saved to: " << MODEL_PATH << std::endl;
+    std::cout << "[TRAINING] Model size: " << model_json.size() << " bytes" << std::endl;
+}
+
+/**
+ * @brief Inference phase - matches infer_model.py
+ */
+void load_and_infer() {
+    std::cout << "\n=== INFERENCE PHASE ===\n" << std::endl;
+    
+    // Load test data
+    auto test_dataset = ml::Dataset::from_csv(TEST_CSV, N_FEATURES);
+    
+    std::cout << "[INFERENCE] Test dataset loaded: " 
+              << test_dataset.size() << " samples" << std::endl;
+    
+    // Load model
+    std::cout << "[INFERENCE] Loading model from: " << MODEL_PATH << std::endl;
+    
+    std::ifstream in(MODEL_PATH);
+    if (!in) {
+        throw std::runtime_error("Cannot read model file: " + MODEL_PATH);
+    }
+    
+    std::string model_json((std::istreambuf_iterator<char>(in)),
+                           std::istreambuf_iterator<char>());
+    in.close();
+    
+    ml::RandomForest rf = ml::RandomForest::from_json(model_json);
+    
+    std::cout << "[INFERENCE] Model loaded successfully" << std::endl;
+    std::cout << "[INFERENCE] Number of trees: " << rf.n_trees() << std::endl;
+    
+    // Predict on test set
+    std::cout << "[INFERENCE] Running predictions on " 
+              << test_dataset.size() << " test samples..." << std::endl;
+    
+    auto start = std::chrono::high_resolution_clock::now();
+    
+    // Try GPU prediction if available, otherwise CPU
+    ml::GpuExecutor gpu;
+    std::vector<float> predictions;
+    
+    if (gpu.is_available()) {
+        std::cout << "[INFERENCE] Using GPU for prediction..." << std::endl;
+        predictions = gpu.predict(rf, test_dataset.data(), N_FEATURES);
+    } else {
+        std::cout << "[INFERENCE] Using CPU for prediction..." << std::endl;
+        predictions = rf.predict_cpu(test_dataset.data(), 
+                                     test_dataset.size(), 
+                                     N_FEATURES);
+    }
+    
+    auto end = std::chrono::high_resolution_clock::now();
+    auto duration = std::chrono::duration_cast<std::chrono::milliseconds>(end - start);
+    
+    // Calculate MSE
+    float mse = calculate_mse(predictions, test_dataset.labels());
+    
+    // Print results - same format as Python
+    std::cout << "\n[INFERENCE] Results:" << std::endl;
+    std::cout << "[INFERENCE] Samples: " << test_dataset.size() << std::endl;
+    std::cout << "[INFERENCE] Inference time: " << duration.count() << " ms" << std::endl;
+    std::cout << std::fixed << std::setprecision(4);
+    std::cout << "[INFERENCE] Mean Squared Error: " << mse << std::endl;
+}
+
+/**
+ * @brief Main entry point - matches main.py sequence
+ */
+int main(int argc, char** argv) {
+    try {
+        std::cout << "╔════════════════════════════════════════════════╗" << std::endl;
+        std::cout << "║   WASM ML Benchmark - Diabetes Prediction     ║" << std::endl;
+        std::cout << "║   C++ + wasi:webgpu implementation            ║" << std::endl;
+        std::cout << "╚════════════════════════════════════════════════╝" << std::endl;
+        
+        // Step 1: Training (matches MLTrainer.train_and_split())
+        train_and_save();
+        
+        // Step 2: Inference (matches MLInferencer.run_inference())
+        load_and_infer();
+        
+        std::cout << "\n✅ Benchmark completed successfully!" << std::endl;
+        
+        return 0;
+        
+    } catch (const std::exception& e) {
+        std::cerr << "\n❌ Error: " << e.what() << std::endl;
+        return 1;
+    }
+}

@@ -21,6 +21,12 @@ if [ ! -f "$BINARY_PATH" ]; then
     exit $?
 fi
 
+python3 attestation/attestation.py
+if [ $? -ne 0 ]; then
+    echo "Attestazione fallita sull'host. Blocco esecuzione."
+    exit 1
+fi
+
 # Check if data exists
 if [ ! -f "wasm-ml/data/diabetes_train.csv" ] || [ ! -f "wasm-ml/data/diabetes_test.csv" ]; then
     echo -e "Dataset not found. Exporting..."

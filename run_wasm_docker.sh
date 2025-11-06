@@ -16,6 +16,12 @@ echo ""
 
 cd "$(dirname "$0")"
 
+python3 attestation/attestation.py
+if [ $? -ne 0 ]; then
+    echo "Attestazione fallita sull'host. Blocco esecuzione."
+    exit 1
+fi
+
 # Build Docker image
 echo -e "Building Docker image..."
 docker build -f docker/Dockerfile.wasm -t $IMAGE_NAME .
