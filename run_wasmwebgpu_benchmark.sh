@@ -26,24 +26,22 @@ else
     echo "  ✓ Dataset already exists"
 fi
 
-# Create symlink for C++ version to use same data
-if [ ! -L "wasmwebgpu-ml/data" ]; then
-    echo "  Creating data symlink..."
-    cd wasmwebgpu-ml
-    ln -s ../wasm-ml/data data
-    cd ..
-    echo "  ✓ Symlink created"
-fi
+# Copy CSV files to C++ project (symlinks don't work in WASM)
+echo "  Copying CSV files to wasmwebgpu-ml/data..."
+mkdir -p wasmwebgpu-ml/data
+cp wasm-ml/data/diabetes_train.csv wasmwebgpu-ml/data/
+cp wasm-ml/data/diabetes_test.csv wasmwebgpu-ml/data/
+echo "CSV files copied"
 
 echo ""
 
 # Step 2: Verify CSV files
 echo "[2/4] Verifying CSV files..."
-TRAIN_CSV="wasm-ml/data/diabetes_train.csv"
-TEST_CSV="wasm-ml/data/diabetes_test.csv"
+TRAIN_CSV="wasmwebgpu-ml/data/diabetes_train.csv"
+TEST_CSV="wasmwebgpu-ml/data/diabetes_test.csv"
 
 if [ ! -f "$TRAIN_CSV" ]; then
-    echo "  ❌ Training CSV not found: $TRAIN_CSV"
+    echo "Training CSV not found: $TRAIN_CSV"
     exit 1
 fi
 if [ ! -f "$TEST_CSV" ]; then
@@ -100,12 +98,9 @@ if command -v wasmtime &> /dev/null; then
     echo ""
     echo "  ─────────────────────────────────────────────"
     
-    # Run with proper directory mappings (without --allow-stdio which is not supported)
+    # Run with proper directory mapping
     cd wasmwebgpu-ml
-    wasmtime run \
-        --dir=. \
-        --dir=../wasm-ml/data \
-        build/wasmwebgpu-ml-benchmark.wasm
+    wasmtime run --dir=. build/wasmwebgpu-ml-benchmark.wasm
     
     EXIT_CODE=$?
     cd ..
@@ -124,10 +119,7 @@ elif command -v wasmer &> /dev/null; then
     echo "  ─────────────────────────────────────────────"
     
     cd wasmwebgpu-ml
-    wasmer run \
-        --dir=. \
-        --mapdir=/data:../wasm-ml/data \
-        build/wasmwebgpu-ml-benchmark.wasm
+    wasmer run --dir=. build/wasmwebgpu-ml-benchmark.wasm
     
     EXIT_CODE=$?
     cd ..
