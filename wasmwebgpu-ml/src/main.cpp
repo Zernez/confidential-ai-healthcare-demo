@@ -37,7 +37,8 @@ const std::string TEST_CSV = "data/diabetes_test.csv";
 float calculate_mse(const std::vector<float>& predictions, 
                    const std::vector<float>& actual) {
     if (predictions.size() != actual.size()) {
-        throw std::invalid_argument("Prediction and actual length mismatch");
+    fprintf(stderr, "Prediction and actual length mismatch\n");
+    exit(1);
     }
     
     float sum = 0.0f;
@@ -93,7 +94,8 @@ void train_and_save() {
     
     std::ofstream out(MODEL_PATH);
     if (!out) {
-        throw std::runtime_error("Cannot write model file: " + MODEL_PATH);
+    fprintf(stderr, "Cannot write model file: %s\n", MODEL_PATH.c_str());
+    exit(1);
     }
     out << model_json;
     out.close();
@@ -119,7 +121,8 @@ void load_and_infer() {
     
     std::ifstream in(MODEL_PATH);
     if (!in) {
-        throw std::runtime_error("Cannot read model file: " + MODEL_PATH);
+    fprintf(stderr, "Cannot read model file: %s\n", MODEL_PATH.c_str());
+    exit(1);
     }
     
     std::string model_json((std::istreambuf_iterator<char>(in)),
@@ -169,7 +172,7 @@ void load_and_infer() {
  * @brief Main entry point - matches main.py sequence
  */
 int main(int argc, char** argv) {
-    try {
+    // WASI: no try/catch, use explicit error check
         std::cout << "╔════════════════════════════════════════════════╗" << std::endl;
         std::cout << "║   WASM ML Benchmark - Diabetes Prediction     ║" << std::endl;
         std::cout << "║   C++ + wasi:webgpu implementation            ║" << std::endl;

@@ -25,10 +25,12 @@ Dataset::Dataset(const std::vector<float>& data,
     , n_features_(n_features) 
 {
     if (data.size() != n_samples * n_features) {
-        throw std::invalid_argument("Data size mismatch");
+    fprintf(stderr, "Data size mismatch\n");
+    exit(1);
     }
     if (labels.size() != n_samples) {
-        throw std::invalid_argument("Labels size mismatch");
+    fprintf(stderr, "Labels size mismatch\n");
+    exit(1);
     }
 }
 
@@ -37,7 +39,8 @@ Dataset Dataset::from_csv(const std::string& filepath, size_t n_features) {
     
     std::ifstream file(filepath);
     if (!file.is_open()) {
-        throw std::runtime_error("Cannot open file: " + filepath);
+    fprintf(stderr, "Cannot open file: %s\n", filepath.c_str());
+    exit(1);
     }
     
     std::vector<float> data;
@@ -56,27 +59,31 @@ Dataset Dataset::from_csv(const std::string& filepath, size_t n_features) {
         // Read features
         for (size_t i = 0; i < n_features; ++i) {
             if (!std::getline(ss, token, ',')) {
-                throw std::runtime_error("Invalid CSV format at line " + 
+                fprintf(stderr, "Invalid CSV format at line %d\n", line_num);
+                exit(1);
                                        std::to_string(n_samples + 2));
             }
-            try {
+            // WASI: no try/catch, use explicit error check
                 float value = std::stof(token);
                 data.push_back(value);
-            } catch (const std::exception& e) {
-                throw std::runtime_error("Invalid float value: " + token);
+            // WASI: no exceptions, handle error explicitly
+            fprintf(stderr, "Invalid float value: %s\n", token.c_str());
+            exit(1);
             }
         }
         
         // Read label (last column)
         if (!std::getline(ss, token, ',')) {
-            throw std::runtime_error("Missing label at line " + 
+            fprintf(stderr, "Missing label at line %d\n", line_num);
+            exit(1);
                                    std::to_string(n_samples + 2));
         }
-        try {
+    // WASI: no try/catch, use explicit error check
             float label = std::stof(token);
             labels.push_back(label);
-        } catch (const std::exception& e) {
-            throw std::runtime_error("Invalid label value: " + token);
+        // WASI: no exceptions, handle error explicitly
+        fprintf(stderr, "Invalid label value: %s\n", token.c_str());
+        exit(1);
         }
         
         n_samples++;
@@ -92,14 +99,16 @@ Dataset Dataset::from_csv(const std::string& filepath, size_t n_features) {
 
 const float* Dataset::get_sample(size_t idx) const {
     if (idx >= n_samples_) {
-        throw std::out_of_range("Sample index out of range");
+    fprintf(stderr, "Sample index out of range\n");
+    exit(1);
     }
     return &data_[idx * n_features_];
 }
 
 float Dataset::get_label(size_t idx) const {
     if (idx >= n_samples_) {
-        throw std::out_of_range("Label index out of range");
+    fprintf(stderr, "Label index out of range\n");
+    exit(1);
     }
     return labels_[idx];
 }

@@ -67,7 +67,8 @@ std::vector<uint32_t> GpuExecutor::bootstrap_sample(size_t n_samples, uint32_t s
     
     // TODO: Implement GPU bootstrap sampling
     // For now, throw to indicate not implemented
-    throw std::runtime_error("GPU bootstrap sampling not yet implemented");
+    fprintf(stderr, "GPU bootstrap sampling not yet implemented\n");
+    exit(1);
     
     // Placeholder return
     std::vector<uint32_t> indices;
@@ -84,7 +85,8 @@ std::pair<float, float> GpuExecutor::find_best_split(
     std::cout << "[GPU] find_best_split called (feature=" << feature_idx << ")" << std::endl;
     
     // TODO: Implement GPU split finding
-    throw std::runtime_error("GPU split finding not yet implemented");
+    fprintf(stderr, "GPU split finding not yet implemented\n");
+    exit(1);
     
     return {0.0f, 0.0f};
 }

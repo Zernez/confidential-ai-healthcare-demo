@@ -233,7 +233,8 @@ float DecisionTree::calculate_mse(
 
 float DecisionTree::predict(const float* sample) const {
     if (!root_) {
-        throw std::runtime_error("Tree not trained");
+    fprintf(stderr, "Tree not trained\n");
+    exit(1);
     }
     return root_->predict(sample);
 }
