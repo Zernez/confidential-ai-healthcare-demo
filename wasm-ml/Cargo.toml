@@ -19,8 +19,7 @@ serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
 bincode = "1.3"
 
-# Random Forest implementation
-rand = { version = "0.8", features = ["wasm-bindgen"] }
+rand = "0.8"
 rand_xoshiro = "0.6"
 
 # Math operations
