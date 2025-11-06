@@ -37,8 +37,7 @@ const std::string TEST_CSV = "data/diabetes_test.csv";
 float calculate_mse(const std::vector<float>& predictions, 
                    const std::vector<float>& actual) {
     if (predictions.size() != actual.size()) {
-    fprintf(stderr, "Prediction and actual length mismatch\n");
-    exit(1);
+        throw std::invalid_argument("Prediction and actual length mismatch");
     }
     
     float sum = 0.0f;
@@ -55,17 +54,23 @@ float calculate_mse(const std::vector<float>& predictions,
  */
 void train_and_save() {
     std::cout << "\n=== TRAINING PHASE ===\n" << std::endl;
+    std::cout << std::flush;
     
     // Load training data
+    std::cout << "[DEBUG] About to load training data from: " << TRAIN_CSV << std::endl;
+    std::cout << std::flush;
+    
     auto train_dataset = ml::Dataset::from_csv(TRAIN_CSV, N_FEATURES);
     
     std::cout << "[TRAINING] Dataset loaded: " 
               << train_dataset.size() << " samples, "
               << train_dataset.n_features() << " features" << std::endl;
+    std::cout << std::flush;
     
     // Create and train RandomForest
     std::cout << "[TRAINING] Creating RandomForest with " << N_ESTIMATORS 
               << " estimators, max_depth " << MAX_DEPTH << std::endl;
+    std::cout << std::flush;
     
     ml::RandomForest rf(N_ESTIMATORS, MAX_DEPTH);
     
@@ -76,10 +81,12 @@ void train_and_save() {
     
     if (gpu.is_available()) {
         std::cout << "[TRAINING] Starting GPU training..." << std::endl;
+        std::cout << std::flush;
         rf.train_gpu(train_dataset, gpu);
     } else {
         std::cout << "[TRAINING] GPU not available, starting CPU training..." << std::endl;
         std::cout << "[TRAINING] (this may take a while)..." << std::endl;
+        std::cout << std::flush;
         rf.train_cpu(train_dataset);
     }
     
@@ -88,20 +95,21 @@ void train_and_save() {
     
     std::cout << "[TRAINING] Training completed in " 
               << duration.count() << " ms!" << std::endl;
+    std::cout << std::flush;
     
     // Serialize and save model
     std::string model_json = rf.to_json();
     
     std::ofstream out(MODEL_PATH);
     if (!out) {
-    fprintf(stderr, "Cannot write model file: %s\n", MODEL_PATH.c_str());
-    exit(1);
+        throw std::runtime_error("Cannot write model file: " + MODEL_PATH);
     }
     out << model_json;
     out.close();
     
     std::cout << "[TRAINING] Model saved to: " << MODEL_PATH << std::endl;
     std::cout << "[TRAINING] Model size: " << model_json.size() << " bytes" << std::endl;
+    std::cout << std::flush;
 }
 
 /**
@@ -109,20 +117,25 @@ void train_and_save() {
  */
 void load_and_infer() {
     std::cout << "\n=== INFERENCE PHASE ===\n" << std::endl;
+    std::cout << std::flush;
     
     // Load test data
+    std::cout << "[DEBUG] About to load test data from: " << TEST_CSV << std::endl;
+    std::cout << std::flush;
+    
     auto test_dataset = ml::Dataset::from_csv(TEST_CSV, N_FEATURES);
     
     std::cout << "[INFERENCE] Test dataset loaded: " 
               << test_dataset.size() << " samples" << std::endl;
+    std::cout << std::flush;
     
     // Load model
     std::cout << "[INFERENCE] Loading model from: " << MODEL_PATH << std::endl;
+    std::cout << std::flush;
     
     std::ifstream in(MODEL_PATH);
     if (!in) {
-    fprintf(stderr, "Cannot read model file: %s\n", MODEL_PATH.c_str());
-    exit(1);
+        throw std::runtime_error("Cannot read model file: " + MODEL_PATH);
     }
     
     std::string model_json((std::istreambuf_iterator<char>(in)),
@@ -133,10 +146,12 @@ void load_and_infer() {
     
     std::cout << "[INFERENCE] Model loaded successfully" << std::endl;
     std::cout << "[INFERENCE] Number of trees: " << rf.n_trees() << std::endl;
+    std::cout << std::flush;
     
     // Predict on test set
     std::cout << "[INFERENCE] Running predictions on " 
               << test_dataset.size() << " test samples..." << std::endl;
+    std::cout << std::flush;
     
     auto start = std::chrono::high_resolution_clock::now();
     
@@ -146,9 +161,11 @@ void load_and_infer() {
     
     if (gpu.is_available()) {
         std::cout << "[INFERENCE] Using GPU for prediction..." << std::endl;
+        std::cout << std::flush;
         predictions = gpu.predict(rf, test_dataset.data(), N_FEATURES);
     } else {
         std::cout << "[INFERENCE] Using CPU for prediction..." << std::endl;
+        std::cout << std::flush;
         predictions = rf.predict_cpu(test_dataset.data(), 
                                      test_dataset.size(), 
                                      N_FEATURES);
@@ -166,17 +183,27 @@ void load_and_infer() {
     std::cout << "[INFERENCE] Inference time: " << duration.count() << " ms" << std::endl;
     std::cout << std::fixed << std::setprecision(4);
     std::cout << "[INFERENCE] Mean Squared Error: " << mse << std::endl;
+    std::cout << std::flush;
 }
 
 /**
  * @brief Main entry point - matches main.py sequence
  */
 int main(int argc, char** argv) {
-    // WASI: no try/catch, use explicit error check
+    // Force unbuffered output for better WASM compatibility
+    std::cout.setf(std::ios::unitbuf);
+    std::cerr.setf(std::ios::unitbuf);
+    
+    std::cout << "[STARTUP] C++ WASM ML Benchmark starting..." << std::endl;
+    std::cout << "[STARTUP] Checking file paths..." << std::endl;
+    std::cout << std::flush;
+    
+    try {
         std::cout << "╔════════════════════════════════════════════════╗" << std::endl;
         std::cout << "║   WASM ML Benchmark - Diabetes Prediction     ║" << std::endl;
         std::cout << "║   C++ + wasi:webgpu implementation            ║" << std::endl;
         std::cout << "╚════════════════════════════════════════════════╝" << std::endl;
+        std::cout << std::flush;
         
         // Step 1: Training (matches MLTrainer.train_and_split())
         train_and_save();
@@ -185,6 +212,17 @@ int main(int argc, char** argv) {
         load_and_infer();
         
         std::cout << "\n✅ Benchmark completed successfully!" << std::endl;
+        std::cout << std::flush;
         
         return 0;
+        
+    } catch (const std::exception& e) {
+        std::cerr << "\n❌ Error: " << e.what() << std::endl;
+        std::cerr << std::flush;
+        return 1;
+    } catch (...) {
+        std::cerr << "\n❌ Unknown error occurred" << std::endl;
+        std::cerr << std::flush;
+        return 1;
+    }
 }
