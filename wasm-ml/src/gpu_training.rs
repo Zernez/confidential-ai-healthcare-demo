@@ -6,6 +6,7 @@
 //! 3. Histogram building for split candidates
 
 use wgpu::{Device, Queue, Buffer, ComputePipeline, BindGroup, CommandEncoder};
+use wgpu::util::DeviceExt;
 use bytemuck::{Pod, Zeroable};
 use std::collections::HashMap;
 

@@ -4,6 +4,7 @@
 //! using WebGPU compute shaders.
 
 use wgpu::{
+use wgpu::util::DeviceExt;
     Adapter, Device, Queue, Instance, ComputePipeline, Buffer, BindGroup,
     BindGroupLayout, PipelineLayout, ShaderModule,
 };

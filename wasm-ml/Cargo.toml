@@ -11,6 +11,8 @@ name = "wasm-ml-benchmark"
 path = "src/main.rs"
 
 [dependencies]
+# Futures for wasm-bindgen
+wasm-bindgen-futures = "0.4"
 # WASI bindings
 wit-bindgen = "0.30"
 
