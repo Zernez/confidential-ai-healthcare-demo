@@ -28,7 +28,7 @@ if(BUILD_WASM)
         -O3                          # Optimize for speed
         -flto                        # Link-time optimization
         -fno-exceptions              # No exceptions (reduce size)
-        --target=wasm32-wasip2       # WASI Preview 2
+        --target=wasm32-wasi         # WASI target (not wasip2 for better compatibility)
     )
     
     # Linker flags for WASM
@@ -36,10 +36,10 @@ if(BUILD_WASM)
         -Wl,--strip-all              # Strip debug symbols
         -Wl,--gc-sections            # Remove unused sections
         -Wl,--lto-O3                 # LTO optimization
-        -mexec-model=reactor         # WASI reactor model
+        # Default exec-model is "command" which calls main()
     )
     
-    message(STATUS "Building for WASM target (wasm32-wasip2)")
+    message(STATUS "Building for WASM target (wasm32-wasi)")
 endif()
 
 # ═══════════════════════════════════════════════
@@ -99,7 +99,7 @@ message(STATUS "  WASM Build: ${BUILD_WASM}")
 message(STATUS "  Native Build: ${BUILD_NATIVE}")
 if(BUILD_WASM)
     message(STATUS "  Compiler: ${CMAKE_CXX_COMPILER}")
-    message(STATUS "  Target: wasm32-wasip2")
+    message(STATUS "  Target: wasm32-wasi")
 endif()
 message(STATUS "═══════════════════════════════════════")
 message(STATUS "")
