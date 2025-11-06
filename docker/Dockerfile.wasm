@@ -1,0 +1,67 @@
+# Dockerfile for WASM ML deployment with WebGPU support
+FROM nvidia/cuda:12.2.0-runtime-ubuntu22.04
+
+ENV DEBIAN_FRONTEND=noninteractive \
+    PYTHONUNBUFFERED=1
+
+# Install system dependencies
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    wget \
+    curl \
+    ca-certificates \
+    build-essential \
+    pkg-config \
+    libssl-dev \
+    && rm -rf /var/lib/apt/lists/*
+
+# Install Rust
+RUN curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y
+ENV PATH="/root/.cargo/bin:${PATH}"
+
+# Add WASM target
+RUN rustup target add wasm32-wasi
+
+# Install wasmtime (WASI runtime)
+RUN wget https://github.com/bytecodealliance/wasmtime/releases/download/v15.0.0/wasmtime-v15.0.0-x86_64-linux.tar.xz \
+    && tar -xf wasmtime-v15.0.0-x86_64-linux.tar.xz \
+    && mv wasmtime-v15.0.0-x86_64-linux/wasmtime /usr/local/bin/ \
+    && rm -rf wasmtime-v15.0.0-x86_64-linux*
+
+# Install Python 3.11
+RUN apt-get update && apt-get install -y \
+    python3.11 \
+    python3.11-dev \
+    python3-pip \
+    && rm -rf /var/lib/apt/lists/*
+
+# Set Python 3.11 as default
+RUN update-alternatives --install /usr/bin/python3 python3 /usr/bin/python3.11 1 \
+    && update-alternatives --install /usr/bin/python python /usr/bin/python3.11 1
+
+WORKDIR /app
+
+# Copy project files
+COPY wasm-ml ./wasm-ml
+COPY wasm_wrapper.py ./
+COPY *.py ./
+
+# Build WASM module
+RUN cd wasm-ml && cargo build --target wasm32-wasi --release
+
+# Install Python dependencies
+COPY docker/requirements.txt ./
+RUN pip3 install --no-cache-dir -r requirements.txt
+
+# Verify installations
+RUN wasmtime --version && \
+    python3 --version && \
+    rustc --version
+
+# Create directories for models
+RUN mkdir -p /app/models /app/data
+
+# Expose port for web service (if needed)
+EXPOSE 8080
+
+# Default command
+CMD ["python3", "main.py"]

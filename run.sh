@@ -25,11 +25,11 @@ for DEV in /dev/nvidia*; do
 done
 
 # Esegui attestazione sull'host prima di avviare il container
-python3 attestation.py || { echo "Attestazione fallita sull'host. Blocco esecuzione."; exit 1; }
+python3 attestation/attestation.py || { echo "Attestazione fallita sull'host. Blocco esecuzione."; exit 1; }
 
 docker run --gpus all --name $CONTAINER_NAME \
     -v $(pwd):/app \
     -w /app \
     $EXTRA_DEVICES \
     $IMAGE_NAME \
-    bash -c "conda run -n rapids-25.10 python main.py"
+    bash -c "conda run -n rapids-25.10 python python-native/src/main.py"

@@ -19,10 +19,10 @@ echo "Avvio main.py..."
 # fi
 
 # Esegui attestazione sull'host prima di avviare main.py
-python3 attestation.py
+python3 attestation/attestation.py
 if [ $? -ne 0 ]; then
     echo "Attestazione fallita sull'host. Blocco esecuzione."
     exit 1
 fi
 
-python3 main.py
+python3 python-native/src/main.py

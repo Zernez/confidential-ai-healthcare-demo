@@ -1,0 +1,5 @@
+# Generated CSV files
+*.csv
+
+# Generated binary model
+*.bin
