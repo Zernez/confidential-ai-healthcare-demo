@@ -187,9 +187,4 @@ int main(int argc, char** argv) {
         std::cout << "\n✅ Benchmark completed successfully!" << std::endl;
         
         return 0;
-        
-    } catch (const std::exception& e) {
-        std::cerr << "\n❌ Error: " << e.what() << std::endl;
-        return 1;
-    }
 }
