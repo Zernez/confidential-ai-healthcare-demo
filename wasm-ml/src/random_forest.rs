@@ -121,8 +121,8 @@ impl DecisionTree {
         );
         
         // Recursively build subtrees
-        let left = std::pin::Pin::new(Box::new(self.build_tree(data, labels, &left_indices, n_features, depth + 1, rng)));
-        let right = std::pin::Pin::new(Box::new(self.build_tree(data, labels, &right_indices, n_features, depth + 1, rng)));
+    let left = Box::new(self.build_tree(data, labels, &left_indices, n_features, depth + 1, rng));
+    let right = Box::new(self.build_tree(data, labels, &right_indices, n_features, depth + 1, rng));
 
         TreeNode::Internal {
             feature_idx: best_feature,
