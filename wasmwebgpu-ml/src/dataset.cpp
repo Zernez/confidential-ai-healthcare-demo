@@ -4,7 +4,6 @@
  */
 
 #include "dataset.hpp"
-#include <csv.h>  // fast-cpp-csv-parser
 #include <iostream>
 #include <fstream>
 #include <sstream>
@@ -36,48 +35,49 @@ Dataset::Dataset(const std::vector<float>& data,
 
 Dataset Dataset::from_csv(const std::string& filepath, size_t n_features) {
     std::cout << "[LOADING] Reading CSV: " << filepath << std::endl;
-    
     std::ifstream file(filepath);
     if (!file.is_open()) {
-    fprintf(stderr, "Cannot open file: %s\n", filepath.c_str());
-    exit(1);
+        fprintf(stderr, "Cannot open file: %s\n", filepath.c_str());
+        exit(1);
     }
-    
     std::vector<float> data;
     std::vector<float> labels;
     std::string line;
     size_t n_samples = 0;
-    
     // Skip header
     std::getline(file, line);
-    
-    // Read data
     while (std::getline(file, line)) {
         std::istringstream ss(line);
         std::string token;
-        
         // Read features
         for (size_t i = 0; i < n_features; ++i) {
             if (!std::getline(ss, token, ',')) {
-                fprintf(stderr, "Invalid CSV format at line %d\n", line_num);
+                fprintf(stderr, "Invalid CSV format at line %zu\n", n_samples + 2);
                 exit(1);
-                                       std::to_string(n_samples + 2));
             }
-            // WASI: no try/catch, use explicit error check
+            try {
                 float value = std::stof(token);
                 data.push_back(value);
-            // WASI: no exceptions, handle error explicitly
-            fprintf(stderr, "Invalid float value: %s\n", token.c_str());
-            exit(1);
+            } catch (...) {
+                fprintf(stderr, "Invalid float value: %s\n", token.c_str());
+                exit(1);
             }
         }
-        
         // Read label (last column)
         if (!std::getline(ss, token, ',')) {
-            fprintf(stderr, "Missing label at line %d\n", line_num);
+            fprintf(stderr, "Missing label at line %zu\n", n_samples + 2);
             exit(1);
-                                   std::to_string(n_samples + 2));
         }
+        try {
+            float label = std::stof(token);
+            labels.push_back(label);
+        } catch (...) {
+            fprintf(stderr, "Invalid label value: %s\n", token.c_str());
+            exit(1);
+        }
+        ++n_samples;
+    }
+    return Dataset(data, labels, n_samples, n_features);
     // WASI: no try/catch, use explicit error check
             float label = std::stof(token);
             labels.push_back(label);
