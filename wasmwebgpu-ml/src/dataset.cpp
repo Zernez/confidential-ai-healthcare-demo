@@ -56,13 +56,10 @@ Dataset Dataset::from_csv(const std::string& filepath, size_t n_features) {
                 exit(1);
             }
             float value = 0.0f;
-            bool valid = true;
-            try {
-                value = std::stof(token);
-            } catch (...) {
-                valid = false;
-            }
-            if (!valid) {
+            // WASI: no try/catch, use explicit error check
+            char* endptr = nullptr;
+            value = strtof(token.c_str(), &endptr);
+            if (endptr == token.c_str() || *endptr != '\0') {
                 fprintf(stderr, "Invalid float value: %s\n", token.c_str());
                 exit(1);
             }
@@ -74,13 +71,9 @@ Dataset Dataset::from_csv(const std::string& filepath, size_t n_features) {
             exit(1);
         }
         float label = 0.0f;
-        bool valid_label = true;
-        try {
-            label = std::stof(token);
-        } catch (...) {
-            valid_label = false;
-        }
-        if (!valid_label) {
+        char* endptr = nullptr;
+        label = strtof(token.c_str(), &endptr);
+        if (endptr == token.c_str() || *endptr != '\0') {
             fprintf(stderr, "Invalid label value: %s\n", token.c_str());
             exit(1);
         }
@@ -91,23 +84,6 @@ Dataset Dataset::from_csv(const std::string& filepath, size_t n_features) {
     std::cout << "[LOADING] Loaded " << n_samples << " samples with " 
               << n_features << " features" << std::endl;
     return ml::Dataset(data, labels, n_samples, n_features);
-    // WASI: no try/catch, use explicit error check
-            float label = std::stof(token);
-            labels.push_back(label);
-        // WASI: no exceptions, handle error explicitly
-        fprintf(stderr, "Invalid label value: %s\n", token.c_str());
-        exit(1);
-        }
-        
-        n_samples++;
-    }
-    
-    file.close();
-    
-    std::cout << "[LOADING] Loaded " << n_samples << " samples with " 
-              << n_features << " features" << std::endl;
-    
-    return Dataset(data, labels, n_samples, n_features);
 }
 
 const float* Dataset::get_sample(size_t idx) const {
