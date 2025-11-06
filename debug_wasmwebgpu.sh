@@ -42,47 +42,29 @@ else
 fi
 
 echo ""
-echo "4. Testing WASM execution with debug output..."
+echo "4. Testing WASM execution..."
 echo ""
-echo "   Command: wasmtime run --dir=data::wasm-ml/data wasmwebgpu-ml/build/wasmwebgpu-ml-benchmark.wasm"
+echo "   Command: wasmtime run --dir=. --dir=../wasm-ml/data build/wasmwebgpu-ml-benchmark.wasm"
 echo ""
 echo "   Output:"
-echo "   ─────────────────────────────────────────"
+echo "   ─────────────────────────────────────────────"
 
 cd wasmwebgpu-ml
-WASMTIME_LOG=info wasmtime run \
-    --dir=data::../wasm-ml/data \
-    --allow-stdio \
-    build/wasmwebgpu-ml-benchmark.wasm 2>&1
+wasmtime run \
+    --dir=. \
+    --dir=../wasm-ml/data \
+    build/wasmwebgpu-ml-benchmark.wasm
 
 EXIT_CODE=$?
 cd ..
 
-echo "   ─────────────────────────────────────────"
+echo "   ─────────────────────────────────────────────"
 echo ""
 
 if [ $EXIT_CODE -eq 0 ]; then
-    echo "   ✓ Execution successful"
+    echo "Execution successful!"
 else
-    echo "   ❌ Execution failed with exit code: $EXIT_CODE"
-    echo ""
-    echo "   Trying alternative directory mapping..."
-    echo ""
-    
-    cd wasmwebgpu-ml
-    wasmtime run \
-        --dir=. \
-        --dir=../wasm-ml/data \
-        build/wasmwebgpu-ml-benchmark.wasm 2>&1
-    
-    EXIT_CODE2=$?
-    cd ..
-    
-    if [ $EXIT_CODE2 -eq 0 ]; then
-        echo "   ✓ Alternative mapping worked!"
-    else
-        echo "   ❌ Alternative mapping also failed (exit code: $EXIT_CODE2)"
-    fi
+    echo "Failed with exit code: $EXIT_CODE"
 fi
 
 echo ""

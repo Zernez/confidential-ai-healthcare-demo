@@ -97,65 +97,46 @@ echo ""
 # Check for WASM runtime
 if command -v wasmtime &> /dev/null; then
     echo "  Using wasmtime runtime..."
-    echo "  Wasmtime version: $(wasmtime --version)"
     echo ""
-    
-    # Debug: show what files are available
-    echo "  Available files:"
-    echo "    - $(ls -lh wasm-ml/data/diabetes_train.csv)"
-    echo "    - $(ls -lh wasm-ml/data/diabetes_test.csv)"
-    echo ""
-    
-    echo "  Starting execution..."
     echo "  ─────────────────────────────────────────────"
-    echo ""
     
-    # Run with proper directory mappings
-    # Map the data directory explicitly
+    # Run with proper directory mappings (without --allow-stdio which is not supported)
     cd wasmwebgpu-ml
     wasmtime run \
-        --dir=data::../wasm-ml/data \
-        --allow-stdio \
-        build/wasmwebgpu-ml-benchmark.wasm 2>&1
+        --dir=. \
+        --dir=../wasm-ml/data \
+        build/wasmwebgpu-ml-benchmark.wasm
     
     EXIT_CODE=$?
     cd ..
     
-    echo ""
     echo "  ─────────────────────────────────────────────"
+    echo ""
     
     if [ $EXIT_CODE -ne 0 ]; then
-        echo "  ❌ WASM execution failed with exit code: $EXIT_CODE"
-        echo ""
-        echo "  Debugging tips:"
-        echo "    1. Check if CSV files are accessible"
-        echo "    2. Try running with --invoke flag"
-        echo "    3. Check wasmtime logs with WASMTIME_LOG=debug"
+        echo "WASM execution failed with exit code: $EXIT_CODE"
         exit $EXIT_CODE
     fi
     
 elif command -v wasmer &> /dev/null; then
     echo "  Using wasmer runtime..."
-    echo "  Wasmer version: $(wasmer --version)"
     echo ""
-    
-    echo "  Starting execution..."
     echo "  ─────────────────────────────────────────────"
-    echo ""
     
     cd wasmwebgpu-ml
     wasmer run \
+        --dir=. \
         --mapdir=/data:../wasm-ml/data \
-        build/wasmwebgpu-ml-benchmark.wasm 2>&1
+        build/wasmwebgpu-ml-benchmark.wasm
     
     EXIT_CODE=$?
     cd ..
     
-    echo ""
     echo "  ─────────────────────────────────────────────"
+    echo ""
     
     if [ $EXIT_CODE -ne 0 ]; then
-        echo "  ❌ WASM execution failed with exit code: $EXIT_CODE"
+        echo "WASM execution failed with exit code: $EXIT_CODE"
         exit $EXIT_CODE
     fi
 else
