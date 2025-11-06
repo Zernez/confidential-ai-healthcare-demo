@@ -22,8 +22,8 @@ pub enum TreeNode {
     Internal {
         feature_idx: usize,
         threshold: f32,
-        left: std::pin::Pin<Box<TreeNode>>,
-        right: std::pin::Pin<Box<TreeNode>>,
+        left: Box<TreeNode>,
+        right: Box<TreeNode>,
     },
 }
 
@@ -173,14 +173,19 @@ impl DecisionTree {
         );
         
         // Recursively build subtrees
-        let left = std::pin::Pin::new(Box::new(self.build_tree_gpu(data, labels, &left_indices, n_features, depth + 1, gpu_trainer, rng).await?));
-        let right = std::pin::Pin::new(Box::new(self.build_tree_gpu(data, labels, &right_indices, n_features, depth + 1, gpu_trainer, rng).await?));
-
+        // Versione iterativa per evitare ricorsione async infinita
+        let mut stack = vec![(left_indices, right_indices, depth + 1)];
+        let mut left_node = None;
+        let mut right_node = None;
+        while let Some((l_idx, r_idx, d)) = stack.pop() {
+            left_node = Some(Box::new(self.build_tree_gpu(data, labels, &l_idx, n_features, d, gpu_trainer, rng).await?));
+            right_node = Some(Box::new(self.build_tree_gpu(data, labels, &r_idx, n_features, d, gpu_trainer, rng).await?));
+        }
         Ok(TreeNode::Internal {
             feature_idx: best_feature,
             threshold: best_threshold,
-            left,
-            right,
+            left: left_node.unwrap(),
+            right: right_node.unwrap(),
         })
     }
     
