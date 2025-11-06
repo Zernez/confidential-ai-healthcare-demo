@@ -134,47 +134,87 @@ impl DecisionTree {
     
     async fn build_tree_gpu(
         &self,
-        data: &[f32],
-        labels: &[f32],
-        indices: &[usize],
-        n_features: usize,
-        depth: usize,
-        gpu_trainer: &GpuTrainer,
-        rng: &mut impl Rng,
-    ) -> Result<TreeNode, String> {
-        // Base cases
-        if depth >= self.max_depth || indices.len() < 2 {
-            let mean = indices.iter().map(|&i| labels[i]).sum::<f32>() / indices.len() as f32;
-            return Ok(TreeNode::Leaf { value: mean });
+        // Iterative async tree construction
+        use std::collections::VecDeque;
+        struct NodeTask {
+            indices: Vec<usize>,
+            depth: usize,
+            parent: Option<*mut TreeNode>,
+            is_left: bool,
         }
-        
-        // Find best split using GPU
-        let (best_feature, best_threshold, best_score) = self.find_best_split_gpu(
-            data,
-            labels,
-            indices,
-            n_features,
-            gpu_trainer,
-            rng,
-        ).await?;
-        
-        if best_score.is_infinite() {
-            let mean = indices.iter().map(|&i| labels[i]).sum::<f32>() / indices.len() as f32;
-            return Ok(TreeNode::Leaf { value: mean });
+        let mut queue = VecDeque::new();
+        let mut root: Option<Box<TreeNode>> = None;
+        queue.push_back(NodeTask {
+            indices: indices.to_vec(),
+            depth,
+            parent: None,
+            is_left: false,
+        });
+        while let Some(task) = queue.pop_front() {
+            let NodeTask { indices, depth, parent, is_left } = task;
+            let node = if depth >= self.max_depth || indices.len() < 2 {
+                let mean = indices.iter().map(|&i| labels[i]).sum::<f32>() / indices.len() as f32;
+                Box::new(TreeNode::Leaf { value: mean })
+            } else {
+                let (best_feature, best_threshold, best_score) = self.find_best_split_gpu(
+                    data,
+                    labels,
+                    &indices,
+                    n_features,
+                    gpu_trainer,
+                    rng,
+                ).await?;
+                if best_score.is_infinite() {
+                    let mean = indices.iter().map(|&i| labels[i]).sum::<f32>() / indices.len() as f32;
+                    Box::new(TreeNode::Leaf { value: mean })
+                } else {
+                    let (left_indices, right_indices) = self.split_data(
+                        data,
+                        &indices,
+                        n_features,
+                        best_feature,
+                        best_threshold,
+                    );
+                    let mut internal = TreeNode::Internal {
+                        feature_idx: best_feature,
+                        threshold: best_threshold,
+                        left: Box::new(TreeNode::Leaf { value: 0.0 }), // placeholder
+                        right: Box::new(TreeNode::Leaf { value: 0.0 }), // placeholder
+                    };
+                    let internal_ptr: *mut TreeNode = &mut internal;
+                    queue.push_back(NodeTask {
+                        indices: left_indices,
+                        depth: depth + 1,
+                        parent: Some(internal_ptr),
+                        is_left: true,
+                    });
+                    queue.push_back(NodeTask {
+                        indices: right_indices,
+                        depth: depth + 1,
+                        parent: Some(internal_ptr),
+                        is_left: false,
+                    });
+                    Box::new(internal)
+                }
+            };
+            if let Some(parent_ptr) = parent {
+                unsafe {
+                    match parent_ptr.as_mut().unwrap() {
+                        TreeNode::Internal { left, right, .. } => {
+                            if is_left {
+                                *left = node;
+                            } else {
+                                *right = node;
+                            }
+                        }
+                        _ => {}
+                    }
+                }
+            } else {
+                root = Some(node);
+            }
         }
-        
-        // Split data
-        let (left_indices, right_indices) = self.split_data(
-            data,
-            indices,
-            n_features,
-            best_feature,
-            best_threshold,
-        );
-        
-        // Recursively build subtrees
-        // Versione iterativa per evitare ricorsione async infinita
-        let mut stack = vec![(left_indices, right_indices, depth + 1)];
+        Ok(*root.unwrap())
         let mut left_node = None;
         let mut right_node = None;
         while let Some((l_idx, r_idx, d)) = stack.pop() {
