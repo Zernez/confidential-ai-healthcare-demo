@@ -134,6 +134,14 @@ impl DecisionTree {
     
     async fn build_tree_gpu(
         &self,
+        data: &[f32],
+        labels: &[f32],
+        indices: &[usize],
+        n_features: usize,
+        depth: usize,
+        gpu_trainer: &GpuTrainer,
+        rng: &mut impl Rng,
+    ) -> Result<TreeNode, String> {
         // Iterative async tree construction
         use std::collections::VecDeque;
         struct NodeTask {
