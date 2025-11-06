@@ -20,12 +20,12 @@ fi
 
 # [2/6] Check WASM target
 echo -e "[2/6] Checking wasm32-wasi target..."
-if ! rustup target list --installed | grep -q "wasm32-wasi"; then
-    echo -e "Installing wasm32-wasi target..."
-    rustup target add wasm32-wasi
-    echo -e "wasm32-wasi installed"
+if ! rustup target list --installed | grep -q "wasm32-wasip1"; then
+    echo -e "Installing wasm32-wasip1 target..."
+    rustup target add wasm32-wasip1
+    echo -e "wasm32-wasip1 installed"
 else
-    echo -e "wasm32-wasi already installed"
+    echo -e "wasm32-wasip1 already installed"
 fi
 
 # [3/6] Clean if requested
@@ -43,36 +43,11 @@ if [[ "$1" == "--test" ]]; then
     pushd "$wasmDir" > /dev/null
     cargo test
     if [ $? -ne 0 ]; then
-        echo -e "Tests failed"
-        popd > /dev/null
-        exit 1
-    fi
-    popd > /dev/null
-    echo -e "Tests passed"
-fi
 
 # [5/6] Build
 releaseFlag=""
-buildConfig="debug"
-if [[ "$1" == "--release" ]]; then
-    releaseFlag="--release"
-    buildConfig="release"
-fi
-
-echo -e "[5/6] Building WASM module..."
 pushd "$wasmDir" > /dev/null
-echo -e "Build mode: $buildConfig"
-cargo build --target wasm32-wasi $releaseFlag
-if [ $? -ne 0 ]; then
-    echo -e "Build failed"
-    popd > /dev/null
-    exit 1
-fi
-popd > /dev/null
-echo -e "Build complete"
 
-# [6/6] Show output location
-wasmOutput="$wasmDir/target/wasm32-wasi/$buildConfig/wasm_ml.wasm"
 if [ -f "$wasmOutput" ]; then
     wasmSize=$(du -k "$wasmOutput" | cut -f1)
     echo -e "[6/6] Build Summary"
