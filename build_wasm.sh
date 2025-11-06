@@ -43,11 +43,36 @@ if [[ "$1" == "--test" ]]; then
     pushd "$wasmDir" > /dev/null
     cargo test
     if [ $? -ne 0 ]; then
+        echo -e "Tests failed"
+        popd > /dev/null
+        exit 1
+    fi
+    popd > /dev/null
+    echo -e "Tests complete"
+    exit 0
+fi
 
-# [5/6] Build
 releaseFlag=""
-pushd "$wasmDir" > /dev/null
+buildConfig="debug"
+if [[ "$1" == "--release" ]]; then
+    releaseFlag="--release"
+    buildConfig="release"
+fi
 
+echo -e "[5/6] Building WASM module..."
+pushd "$wasmDir" > /dev/null
+echo -e "Build mode: $buildConfig"
+cargo build --target wasm32-wasip1 $releaseFlag
+if [ $? -ne 0 ]; then
+    echo -e "Build failed"
+    popd > /dev/null
+    exit 1
+fi
+popd > /dev/null
+echo -e "Build complete"
+
+# [6/6] Show output location
+wasmOutput="$wasmDir/target/wasm32-wasip1/$buildConfig/wasm_ml.wasm"
 if [ -f "$wasmOutput" ]; then
     wasmSize=$(du -k "$wasmOutput" | cut -f1)
     echo -e "[6/6] Build Summary"
@@ -57,19 +82,3 @@ else
     echo -e "[6/6] Build Summary"
     echo -e "  Location: $wasmOutput (not found)"
 fi
-
-if [[ "$1" != "--release" ]]; then
-    echo -e ""
-    echo -e "Tip: Use --release flag for optimized build"
-    echo -e "   ./build_wasm.sh --release"
-fi
-
-echo -e ""
-echo -e "=================================================="
-echo -e "  Build Complete!"
-echo -e "=================================================="
-echo -e ""
-echo -e "Next steps:"
-echo -e "  1. Test with: python wasm_wrapper.py"
-echo -e "  2. Deploy to Azure: ./infrastructure/deploy.sh"
-echo -e ""
