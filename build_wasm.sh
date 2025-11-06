@@ -2,8 +2,8 @@
 set -e
 
 # ==================================================
-echo -e "\033[36m  WASM ML Build Script\033[0m"
-echo -e "\033[36m==================================================\033[0m"
+echo -e "WASM ML Build Script"
+echo -e "=================================================="
 
 projectRoot="$(cd "$(dirname "$0")" && pwd)"
 wasmDir="$projectRoot/wasm-ml"
@@ -11,8 +11,8 @@ wasmDir="$projectRoot/wasm-ml"
 # [1/6] Check Rust installation
 echo -e "[1/6] Checking Rust installation..."
 if ! command -v rustc &> /dev/null; then
-    echo -e "Rust not found. Please install from https://rustup.rs"
-    exit 1
+    echo -e "Rust not found. Installing..."
+    curl --proto '=https' --tlsv1.2 https://sh.rustup.rs -sSf | sh
 else
     rustVersion=$(rustc --version)
     echo -e "Rust installed: $rustVersion"
@@ -85,14 +85,14 @@ fi
 
 if [[ "$1" != "--release" ]]; then
     echo -e ""
-    echo -e "💡 Tip: Use --release flag for optimized build"
+    echo -e "Tip: Use --release flag for optimized build"
     echo -e "   ./build_wasm.sh --release"
 fi
 
 echo -e ""
-echo -e "\033[36m==================================================\033[0m"
-echo -e "\033[32m  Build Complete! \033[0m"
-echo -e "\033[36m==================================================\033[0m"
+echo -e "=================================================="
+echo -e "  Build Complete!"
+echo -e "=================================================="
 echo -e ""
 echo -e "Next steps:"
 echo -e "  1. Test with: python wasm_wrapper.py"
