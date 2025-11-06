@@ -173,8 +173,8 @@ impl DecisionTree {
         );
         
         // Recursively build subtrees
-        let left = Box::pin(self.build_tree_gpu(data, labels, &left_indices, n_features, depth + 1, gpu_trainer, rng).await?);
-        let right = Box::pin(self.build_tree_gpu(data, labels, &right_indices, n_features, depth + 1, gpu_trainer, rng).await?);
+    let left = Box::new(self.build_tree_gpu(data, labels, &left_indices, n_features, depth + 1, gpu_trainer, rng).await?);
+    let right = Box::new(self.build_tree_gpu(data, labels, &right_indices, n_features, depth + 1, gpu_trainer, rng).await?);
 
         Ok(TreeNode::Internal {
             feature_idx: best_feature,
