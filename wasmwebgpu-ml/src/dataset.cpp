@@ -55,29 +55,42 @@ Dataset Dataset::from_csv(const std::string& filepath, size_t n_features) {
                 fprintf(stderr, "Invalid CSV format at line %zu\n", n_samples + 2);
                 exit(1);
             }
+            float value = 0.0f;
+            bool valid = true;
             try {
-                float value = std::stof(token);
-                data.push_back(value);
+                value = std::stof(token);
             } catch (...) {
+                valid = false;
+            }
+            if (!valid) {
                 fprintf(stderr, "Invalid float value: %s\n", token.c_str());
                 exit(1);
             }
+            data.push_back(value);
         }
         // Read label (last column)
         if (!std::getline(ss, token, ',')) {
             fprintf(stderr, "Missing label at line %zu\n", n_samples + 2);
             exit(1);
         }
+        float label = 0.0f;
+        bool valid_label = true;
         try {
-            float label = std::stof(token);
-            labels.push_back(label);
+            label = std::stof(token);
         } catch (...) {
+            valid_label = false;
+        }
+        if (!valid_label) {
             fprintf(stderr, "Invalid label value: %s\n", token.c_str());
             exit(1);
         }
-        ++n_samples;
+        labels.push_back(label);
+        n_samples++;
     }
-    return Dataset(data, labels, n_samples, n_features);
+    file.close();
+    std::cout << "[LOADING] Loaded " << n_samples << " samples with " 
+              << n_features << " features" << std::endl;
+    return ml::Dataset(data, labels, n_samples, n_features);
     // WASI: no try/catch, use explicit error check
             float label = std::stof(token);
             labels.push_back(label);
