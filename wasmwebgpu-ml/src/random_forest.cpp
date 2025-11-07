@@ -297,18 +297,17 @@ void RandomForest::train_gpu(const Dataset& dataset, GpuExecutor& gpu) {
         uint32_t seed = rng();
         std::vector<uint32_t> bootstrap_indices;
         
-        try {
-            bootstrap_indices = gpu.bootstrap_sample(dataset.size(), seed);
-        } catch (const std::exception& e) {
-            std::cerr << "[TRAINING] GPU bootstrap failed, using CPU: " << e.what() << std::endl;
-            auto [sampled_data, sampled_labels] = dataset.bootstrap_sample(rng);
+        bootstrap_indices = gpu.bootstrap_sample(dataset.size(), seed);
+        // } catch (const std::exception& e) {
+        //     std::cerr << "[TRAINING] GPU bootstrap failed, using CPU: " << e.what() << std::endl;
+        //     auto [sampled_data, sampled_labels] = dataset.bootstrap_sample(rng);
             
-            DecisionTree tree(max_depth_);
-            tree.train_cpu(sampled_data, sampled_labels, 
-                          dataset.size(), dataset.n_features(), rng);
-            trees_.push_back(std::move(tree));
-            continue;
-        }
+        //     DecisionTree tree(max_depth_);
+        //     tree.train_cpu(sampled_data, sampled_labels, 
+        //                   dataset.size(), dataset.n_features(), rng);
+        //     trees_.push_back(std::move(tree));
+        //     continue;
+        // }
         
         // Extract bootstrapped data
         std::vector<float> sampled_data;
