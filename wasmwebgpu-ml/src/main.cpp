@@ -25,8 +25,8 @@
 constexpr size_t N_ESTIMATORS = 200;
 constexpr size_t MAX_DEPTH = 16;
 constexpr size_t N_FEATURES = 10;
-const std::string TRAIN_CSV = "data/diabetes_train.csv";
-const std::string TEST_CSV = "data/diabetes_test.csv";
+const std::string TRAIN_CSV = "diabetes_train.csv";
+const std::string TEST_CSV = "diabetes_test.csv";
 
 /**
  * @brief Calculate Mean Squared Error
