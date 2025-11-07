@@ -1,0 +1,111 @@
+# Dockerfile for C++ WASM ML deployment with wasi:webgpu support
+FROM nvidia/cuda:12.2.0-runtime-ubuntu22.04
+
+ENV DEBIAN_FRONTEND=noninteractive \
+    PYTHONUNBUFFERED=1 \
+    WASI_SDK_PATH=/opt/wasi-sdk \
+    WASI_WEBGPU_ENABLED=1
+
+# Install system dependencies
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    wget \
+    curl \
+    ca-certificates \
+    build-essential \
+    cmake \
+    pkg-config \
+    libssl-dev \
+    git \
+    xz-utils \
+    && rm -rf /var/lib/apt/lists/*
+
+# Install WASI SDK
+RUN wget -q https://github.com/WebAssembly/wasi-sdk/releases/download/wasi-sdk-24/wasi-sdk-24.0-x86_64-linux.tar.gz \
+    && tar -xzf wasi-sdk-24.0-x86_64-linux.tar.gz -C /opt \
+    && mv /opt/wasi-sdk-24.0 /opt/wasi-sdk \
+    && rm wasi-sdk-24.0-x86_64-linux.tar.gz
+
+# Add WASI SDK to PATH
+ENV PATH="${WASI_SDK_PATH}/bin:${PATH}" \
+    CC="${WASI_SDK_PATH}/bin/clang" \
+    CXX="${WASI_SDK_PATH}/bin/clang++" \
+    AR="${WASI_SDK_PATH}/bin/llvm-ar" \
+    RANLIB="${WASI_SDK_PATH}/bin/llvm-ranlib" \
+    CMAKE_TOOLCHAIN_FILE="${WASI_SDK_PATH}/share/cmake/wasi-sdk.cmake"
+
+# Install wasmtime (WASI runtime with WebGPU support)
+RUN wget -q https://github.com/bytecodealliance/wasmtime/releases/download/v15.0.0/wasmtime-v15.0.0-x86_64-linux.tar.xz \
+    && tar -xf wasmtime-v15.0.0-x86_64-linux.tar.xz \
+    && mv wasmtime-v15.0.0-x86_64-linux/wasmtime /usr/local/bin/ \
+    && rm -rf wasmtime-v15.0.0-x86_64-linux*
+
+# Install Python 3.11 for data export
+RUN apt-get update && apt-get install -y \
+    python3.11 \
+    python3.11-dev \
+    python3-pip \
+    && rm -rf /var/lib/apt/lists/*
+
+# Set Python 3.11 as default
+RUN update-alternatives --install /usr/bin/python3 python3 /usr/bin/python3.11 1 \
+    && update-alternatives --install /usr/bin/python python /usr/bin/python3.11 1
+
+WORKDIR /app
+
+# Copy project files
+COPY wasmwebgpu-ml ./wasmwebgpu-ml
+COPY export_diabetes_for_wasm.py ./
+COPY attestation ./attestation
+
+# Download C++ dependencies
+RUN mkdir -p wasmwebgpu-ml/external && \
+    cd wasmwebgpu-ml/external && \
+    # nlohmann/json
+    wget -q https://github.com/nlohmann/json/releases/download/v3.11.3/json.hpp && \
+    # fast-cpp-csv-parser
+    wget -q https://raw.githubusercontent.com/ben-strasser/fast-cpp-csv-parser/master/csv.h && \
+    # Create wasi webgpu placeholder
+    mkdir -p wasi && \
+    echo '/* WebGPU placeholder */' > wasi/webgpu.h
+
+# Build WASM module
+RUN cd wasmwebgpu-ml && \
+    mkdir -p build && \
+    cd build && \
+    cmake .. \
+        -DCMAKE_BUILD_TYPE=Release \
+        -DCMAKE_TOOLCHAIN_FILE="${CMAKE_TOOLCHAIN_FILE}" \
+        -DBUILD_WASM=ON && \
+    cmake --build . --config Release -j$(nproc)
+
+# Install Python dependencies (for data export)
+COPY docker/requirements.txt ./
+RUN pip3 install --no-cache-dir -r requirements.txt
+
+# Verify installations
+RUN wasmtime --version && \
+    python3 --version && \
+    ${CXX} --version && \
+    cmake --version
+
+# Create directories for data
+RUN mkdir -p /app/data /app/models
+
+# Create symlink for data access
+RUN cd wasmwebgpu-ml && ln -sf ../wasm-ml/data data || true
+
+# Set GPU environment variables
+ENV NVIDIA_VISIBLE_DEVICES=all \
+    NVIDIA_DRIVER_CAPABILITIES=compute,utility \
+    WASI_WEBGPU_ENABLED=1
+
+# Expose port for web service (if needed)
+EXPOSE 8080
+
+# Default command: export data and run benchmark
+CMD ["bash", "-c", "\
+    python3 export_diabetes_for_wasm.py && \
+    cd wasmwebgpu-ml && \
+    python3 ../attestation/attestation.py && \
+    wasmtime run --dir=. --dir=../wasm-ml/data --env WASI_WEBGPU_ENABLED=1 build/wasmwebgpu-ml-benchmark.wasm \
+"]

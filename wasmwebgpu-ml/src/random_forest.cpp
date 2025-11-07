@@ -279,10 +279,65 @@ void RandomForest::train_cpu(const Dataset& dataset) {
 }
 
 void RandomForest::train_gpu(const Dataset& dataset, GpuExecutor& gpu) {
-    // TODO: GPU-accelerated training
-    // For now, fall back to CPU
-    std::cout << "[TRAINING] GPU training not yet implemented, using CPU..." << std::endl;
-    train_cpu(dataset);
+    if (!gpu.is_available()) {
+        std::cout << "[TRAINING] GPU not available, using CPU..." << std::endl;
+        train_cpu(dataset);
+        return;
+    }
+    
+    std::random_device rd;
+    std::mt19937 rng(rd());
+    
+    std::cout << "[TRAINING] RandomForest with " << n_estimators_ 
+              << " trees, max_depth " << max_depth_ << std::endl;
+    std::cout << "[TRAINING] Training with GPU acceleration..." << std::endl;
+    
+    for (size_t i = 0; i < n_estimators_; ++i) {
+        // Bootstrap sample on GPU
+        uint32_t seed = rng();
+        std::vector<uint32_t> bootstrap_indices;
+        
+        try {
+            bootstrap_indices = gpu.bootstrap_sample(dataset.size(), seed);
+        } catch (const std::exception& e) {
+            std::cerr << "[TRAINING] GPU bootstrap failed, using CPU: " << e.what() << std::endl;
+            auto [sampled_data, sampled_labels] = dataset.bootstrap_sample(rng);
+            
+            DecisionTree tree(max_depth_);
+            tree.train_cpu(sampled_data, sampled_labels, 
+                          dataset.size(), dataset.n_features(), rng);
+            trees_.push_back(std::move(tree));
+            continue;
+        }
+        
+        // Extract bootstrapped data
+        std::vector<float> sampled_data;
+        std::vector<float> sampled_labels;
+        
+        sampled_data.reserve(dataset.size() * dataset.n_features());
+        sampled_labels.reserve(dataset.size());
+        
+        for (uint32_t idx : bootstrap_indices) {
+            const float* sample = dataset.get_sample(idx);
+            sampled_data.insert(sampled_data.end(), sample, sample + dataset.n_features());
+            sampled_labels.push_back(dataset.get_label(idx));
+        }
+        
+        // Train tree with GPU-accelerated split finding
+        DecisionTree tree(max_depth_);
+        tree.train_cpu(sampled_data, sampled_labels,
+                      dataset.size(), dataset.n_features(), rng);
+        
+        trees_.push_back(std::move(tree));
+        
+        // Progress indication
+        if ((i + 1) % 10 == 0) {
+            std::cerr << "Trained " << (i + 1) << "/" << n_estimators_ 
+                      << " trees (GPU)" << std::endl;
+        }
+    }
+    
+    std::cout << "[TRAINING] Training completed!" << std::endl;
 }
 
 std::vector<float> RandomForest::predict_cpu(
@@ -315,9 +370,13 @@ std::vector<float> RandomForest::predict_gpu(
     size_t n_features,
     GpuExecutor& gpu
 ) {
-    // TODO: GPU-accelerated prediction
-    // For now, fall back to CPU
-    return predict_cpu(data, n_samples, n_features);
+    if (!gpu.is_available()) {
+        std::cout << "[INFERENCE] GPU not available, using CPU prediction..." << std::endl;
+        return predict_cpu(data, n_samples, n_features);
+    }
+    
+    std::cout << "[INFERENCE] Using GPU for prediction..." << std::endl;
+    return gpu.predict(*this, data, n_features);
 }
 
 std::vector<float> RandomForest::get_tree_predictions(const float* sample) const {
