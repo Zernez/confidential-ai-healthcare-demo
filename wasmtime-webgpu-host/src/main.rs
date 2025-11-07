@@ -78,7 +78,7 @@ fn main() -> Result<()> {
     let gpu_backend = pollster::block_on(gpu_backend::GpuBackend::new())
         .context("Failed to initialize GPU")?;
     
-    info!("✓ GPU backend initialized");
+    info!("GPU backend initialized");
     info!("  GPU: {}", gpu_backend.adapter_info());
     
     // Create WebGPU host implementation
@@ -91,12 +91,12 @@ fn main() -> Result<()> {
     
     // Create store with host state
     let mut wasi_builder = WasiCtxBuilder::new();
-    wasi_builder = wasi_builder.inherit_stdio();
-    wasi_builder = wasi_builder.inherit_args()?;
+    wasi_builder.inherit_stdio();
+    wasi_builder.inherit_args()?;
     // Add preopened directories
     for dir in &args.dirs {
         info!("Adding directory: {:?}", dir);
-        wasi_builder = wasi_builder.preopened_dir(
+        wasi_builder.preopened_dir(
             wasmtime_wasi::sync::Dir::open_ambient_dir(dir, wasmtime_wasi::sync::ambient_authority())?,
             ".",
         )?;
@@ -116,7 +116,7 @@ fn main() -> Result<()> {
     let module = Module::from_file(&engine, &args.wasm_file)
         .context("Failed to load WASM module")?;
     
-    info!("✓ WASM module loaded");
+    info!("WASM module loaded");
     
     // Instantiate module
     info!("Instantiating module...");
@@ -135,7 +135,7 @@ fn main() -> Result<()> {
         .context("WASM execution failed")?;
     
     info!("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
-    info!("✓ WASM execution completed successfully");
+    info!("WASM execution completed successfully");
     
     Ok(())
 }
