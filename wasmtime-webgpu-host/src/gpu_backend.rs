@@ -22,7 +22,7 @@ impl GpuBackend {
         
         // Create instance
         let instance = Instance::new(InstanceDescriptor {
-            backends: Backends::all(),
+            backends: Backends::VULKAN,
             ..Default::default()
         });
         
