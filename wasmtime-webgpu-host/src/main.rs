@@ -46,7 +46,8 @@ fn parse_args() -> Result<Args> {
     Ok(Args { wasm_file, dirs })
 }
 
-fn main() -> Result<()> {
+#[tokio::main]
+async fn main() -> Result<()> {
     // Initialize logging
     env_logger::Builder::from_env(env_logger::Env::default()
         .default_filter_or("info"))
@@ -75,7 +76,7 @@ fn main() -> Result<()> {
     info!("Initializing GPU backend...");
     
     // Initialize GPU backend
-    let gpu_backend = pollster::block_on(gpu_backend::GpuBackend::new())
+    let gpu_backend = gpu_backend::GpuBackend::new().await
         .context("Failed to initialize GPU")?;
     
     info!("GPU backend initialized");
@@ -120,7 +121,7 @@ fn main() -> Result<()> {
     
     // Instantiate module
     info!("Instantiating module...");
-    let instance = linker.instantiate(&mut store, &module)
+    let instance = linker.instantiate_async(&mut store, &module).await
         .context("Failed to instantiate module")?;
     
     // Find and call _start (WASI entry point)
@@ -131,7 +132,7 @@ fn main() -> Result<()> {
         .get_typed_func::<(), ()>(&mut store, "_start")
         .context("Failed to find _start function")?;
     
-    start.call(&mut store, ())
+    start.call_async(&mut store, ()).await
         .context("WASM execution failed")?;
     
     info!("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
