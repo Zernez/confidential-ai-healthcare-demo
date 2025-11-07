@@ -9,7 +9,7 @@ use anyhow::{Context, Result};
 use wasmtime::*;
 use wasmtime_wasi::{WasiCtx, WasiCtxBuilder};
 use std::path::PathBuf;
-use log::{info, error};
+use log::info;
 
 mod webgpu_host;
 mod gpu_backend;
@@ -90,12 +90,10 @@ fn main() -> Result<()> {
     info!("✓ wasi:webgpu functions registered");
     
     // Create store with host state
-    let wasi = WasiCtxBuilder::new()
-        .inherit_stdio()
-        .inherit_args()?;
-    
+    let mut wasi_builder = WasiCtxBuilder::new();
+    wasi_builder = wasi_builder.inherit_stdio();
+    wasi_builder = wasi_builder.inherit_args()?;
     // Add preopened directories
-    let mut wasi_builder = wasi;
     for dir in &args.dirs {
         info!("Adding directory: {:?}", dir);
         wasi_builder = wasi_builder.preopened_dir(
@@ -103,7 +101,6 @@ fn main() -> Result<()> {
             ".",
         )?;
     }
-    
     let wasi_ctx = wasi_builder.build();
     
     let mut store = Store::new(

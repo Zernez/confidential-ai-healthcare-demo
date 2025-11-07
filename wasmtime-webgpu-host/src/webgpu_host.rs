@@ -131,7 +131,6 @@ impl WebGpuHost {
         // Queue write buffer
         let buffers = self.buffers.clone();
         let gpu = self.gpu.clone();
-        
         linker.func_wrap(
             "wasi:webgpu",
             "queue-write-buffer",
@@ -140,29 +139,26 @@ impl WebGpuHost {
                   buffer_id: u32, 
                   offset: u64, 
                   data_ptr: u32, 
-                  data_len: u32| -> Result<(), Trap> {
-                
+                  data_len: u32| {
                 info!("[wasi:webgpu] queue-write-buffer (buffer={}, offset={}, len={})", 
                       buffer_id, offset, data_len);
-                
                 // Get buffer
                 let buffers = buffers.lock().unwrap();
-                let buffer = buffers.get(&buffer_id)
-                    .ok_or_else(|| Trap::new("Invalid buffer ID"))?;
-                
+                let buffer = match buffers.get(&buffer_id) {
+                    Some(b) => b,
+                    None => panic!("Invalid buffer ID"),
+                };
                 // Read data from WASM memory
-                let memory = caller.get_export("memory")
-                    .ok_or_else(|| Trap::new("No memory export"))?
-                    .into_memory()
-                    .ok_or_else(|| Trap::new("Export is not memory"))?;
-                
-                let data = memory.data(&caller)
-                    .get(data_ptr as usize..(data_ptr + data_len) as usize)
-                    .ok_or_else(|| Trap::new("Invalid memory access"))?;
-                
+                let memory = match caller.get_export("memory") {
+                    Some(m) => m.into_memory().expect("Export is not memory"),
+                    None => panic!("No memory export"),
+                };
+                let data = match memory.data(&caller)
+                    .get(data_ptr as usize..(data_ptr + data_len) as usize) {
+                    Some(d) => d,
+                    None => panic!("Invalid memory access"),
+                };
                 gpu.write_buffer(buffer, offset, data);
-                
-                Ok(())
             },
         )?;
         
@@ -177,36 +173,29 @@ impl WebGpuHost {
             move |mut caller: Caller<'_, HostState>, 
                   _device: u32, 
                   code_ptr: u32, 
-                  code_len: u32| -> Result<u32, Trap> {
-                
+                  code_len: u32| -> u32 {
                 info!("[wasi:webgpu] create-shader-module");
-                
                 // Read shader code from WASM memory
-                let memory = caller.get_export("memory")
-                    .ok_or_else(|| Trap::new("No memory export"))?
-                    .into_memory()
-                    .ok_or_else(|| Trap::new("Export is not memory"))?;
-                
-                let code_bytes = memory.data(&caller)
-                    .get(code_ptr as usize..(code_ptr + code_len) as usize)
-                    .ok_or_else(|| Trap::new("Invalid memory access"))?;
-                
-                let code = std::str::from_utf8(code_bytes)
-                    .map_err(|_| Trap::new("Invalid UTF-8 in shader code"))?;
-                
+                let memory = match caller.get_export("memory") {
+                    Some(m) => m.into_memory().expect("Export is not memory"),
+                    None => panic!("No memory export"),
+                };
+                let code_bytes = match memory.data(&caller)
+                    .get(code_ptr as usize..(code_ptr + code_len) as usize) {
+                    Some(d) => d,
+                    None => panic!("Invalid memory access"),
+                };
+                let code = std::str::from_utf8(code_bytes).expect("Invalid UTF-8 in shader code");
                 let shader_module = gpu.create_shader_module(code);
-                
                 let id = {
                     let mut next = next_id.lock().unwrap();
                     let current = *next;
                     *next += 1;
                     current
                 };
-                
                 shader_modules.lock().unwrap().insert(id, shader_module);
                 info!("  Created shader module with ID: {}", id);
-                
-                Ok(id)
+                id
             },
         )?;
         
