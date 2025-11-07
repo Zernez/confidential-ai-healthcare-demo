@@ -10,7 +10,7 @@ wasmtime-wasi = "15.0"
 anyhow = "1.0"
 
 # wgpu for GPU access
-wgpu = { version = "0.19", features = ["vulkan", "metal", "dx12"] }
+wgpu = "0.19"
 pollster = "0.3"
 
 # Async runtime
