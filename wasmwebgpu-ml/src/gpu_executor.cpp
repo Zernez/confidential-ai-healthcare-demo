@@ -128,8 +128,8 @@ struct GpuExecutor::Impl {
     void load_shaders() {
         // Load WGSL shaders (mounted directly without shaders/ prefix)
         bootstrap_shader = load_shader_file("shaders/bootstrap_sample.wgsl");
-        split_shader = load_shader_file("find_split.wgsl");
-        average_shader = load_shader_file("average.wgsl");
+        split_shader = load_shader_file("shaders/find_split.wgsl");
+        average_shader = load_shader_file("shaders/average.wgsl");
         
         if (!bootstrap_shader.empty() && !split_shader.empty() && !average_shader.empty()) {
             std::cerr << "[GPU] All shaders loaded successfully" << std::endl;
