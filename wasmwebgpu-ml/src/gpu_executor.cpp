@@ -100,37 +100,47 @@ struct GpuExecutor::Impl {
         // Try to initialize GPU
         if (try_init_gpu()) {
             gpu_available = true;
-            std::cerr << "[GPU] ✓ wasi:webgpu initialized successfully" << std::endl;
+            std::cerr << "[GPU] wasi:webgpu initialized successfully" << std::endl;
         } else {
-            std::cerr << "[GPU] ⚠ wasi:webgpu not available, will use CPU fallback" << std::endl;
+            std::cerr << "[GPU] wasi:webgpu not available, will use CPU fallback" << std::endl;
         }
     }
     
-    bool try_init_gpu() {
-        try {
+        bool try_init_gpu() {
             std::cerr << "[GPU] Calling wasi:webgpu create-instance..." << std::endl;
             instance_id = __wasi_webgpu_create_instance();
             std::cerr << "[GPU]   Instance ID: " << instance_id << std::endl;
-            
+            if (instance_id == 0) {
+                std::cerr << "[GPU] Failed to create instance" << std::endl;
+                return false;
+            }
+
             std::cerr << "[GPU] Calling wasi:webgpu request-adapter..." << std::endl;
             adapter_id = __wasi_webgpu_request_adapter(instance_id, 1); // 1 = high performance
             std::cerr << "[GPU]   Adapter ID: " << adapter_id << std::endl;
-            
+            if (adapter_id == 0) {
+                std::cerr << "[GPU] Failed to request adapter" << std::endl;
+                return false;
+            }
+
             std::cerr << "[GPU] Calling wasi:webgpu request-device..." << std::endl;
             device_id = __wasi_webgpu_request_device(adapter_id);
             std::cerr << "[GPU]   Device ID: " << device_id << std::endl;
-            
+            if (device_id == 0) {
+                std::cerr << "[GPU] Failed to request device" << std::endl;
+                return false;
+            }
+
             std::cerr << "[GPU] Calling wasi:webgpu get-queue..." << std::endl;
             queue_id = __wasi_webgpu_get_queue(device_id);
-            std::cerr << "[GPU]   Queue ID: " << queue_id << std::endl;
-            
+            std::cerr << "[GPU] Queue ID: " << queue_id << std::endl;
+            if (queue_id == 0) {
+                std::cerr << "[GPU] Failed to get queue" << std::endl;
+                return false;
+            }
+
             return true;
-            
-        } catch (...) {
-            std::cerr << "[GPU] Exception during wasi:webgpu initialization" << std::endl;
-            return false;
         }
-    }
     
     void load_shaders() {
         // Load WGSL shaders (mounted directly without shaders/ prefix)
@@ -139,23 +149,23 @@ struct GpuExecutor::Impl {
         average_shader = load_shader_file("average.wgsl");
         
         if (!bootstrap_shader.empty() && !split_shader.empty() && !average_shader.empty()) {
-            std::cerr << "[GPU] ✓ All shaders loaded successfully" << std::endl;
+            std::cerr << "[GPU] All shaders loaded successfully" << std::endl;
         } else {
-            std::cerr << "[GPU] ⚠ Some shaders failed to load" << std::endl;
+            std::cerr << "[GPU] Some shaders failed to load" << std::endl;
         }
     }
     
     std::string load_shader_file(const std::string& path) {
         std::ifstream file(path);
         if (!file) {
-            std::cerr << "[GPU] ⚠ Could not load shader: " << path << std::endl;
+            std::cerr << "[GPU] Could not load shader: " << path << std::endl;
             return "";
         }
         
         std::string content((std::istreambuf_iterator<char>(file)),
                            std::istreambuf_iterator<char>());
         
-        std::cerr << "[GPU] ✓ Loaded shader: " << path << " (" << content.size() << " bytes)" << std::endl;
+        std::cerr << "[GPU] Loaded shader: " << path << " (" << content.size() << " bytes)" << std::endl;
         return content;
     }
     
@@ -177,9 +187,9 @@ GpuExecutor::GpuExecutor()
 {
     std::cout << "[GPU] GPU Executor created" << std::endl;
     if (available_) {
-        std::cout << "[GPU] ✓ GPU acceleration available via wasi:webgpu" << std::endl;
+        std::cout << "[GPU] GPU acceleration available via wasi:webgpu" << std::endl;
     } else {
-        std::cout << "[GPU] ℹ Using CPU fallback" << std::endl;
+        std::cout << "[GPU] Using CPU fallback" << std::endl;
     }
 }
 
@@ -222,7 +232,6 @@ std::vector<uint32_t> GpuExecutor::bootstrap_sample(size_t n_samples, uint32_t s
     // GPU implementation using wasi:webgpu
     std::cout << "[GPU] Executing bootstrap_sample via wasi:webgpu..." << std::endl;
     
-    try {
         // Create output buffer
         uint64_t buffer_size = n_samples * sizeof(uint32_t);
         uint32_t buffer_id = __wasi_webgpu_create_buffer(
@@ -230,24 +239,24 @@ std::vector<uint32_t> GpuExecutor::bootstrap_sample(size_t n_samples, uint32_t s
             buffer_size,
             0x0084 // STORAGE | COPY_SRC
         );
-        
-        std::cout << "[GPU]   Created buffer ID: " << buffer_id << " (size=" << buffer_size << ")" << std::endl;
-        
+
+        std::cout << "[GPU] Created buffer ID: " << buffer_id << " (size=" << buffer_size << ")" << std::endl;
+
         // TODO: Create shader module, pipeline, dispatch compute
         // For now, fall back to CPU
-        std::cerr << "[GPU] ⚠ Full GPU pipeline not yet implemented, using CPU" << std::endl;
-        
+        std::cerr << "[GPU] Full GPU pipeline not yet implemented, using CPU" << std::endl;
+
         // CPU fallback
         std::vector<uint32_t> indices;
         indices.reserve(n_samples);
-        
+
         auto xorshift = [](uint32_t x) -> uint32_t {
             x ^= x << 13;
             x ^= x >> 17;
             x ^= x << 5;
             return x;
         };
-        
+
         for (size_t i = 0; i < n_samples; ++i) {
             uint32_t rng_state = seed + i * 747796405u + 2891336453u;
             rng_state = xorshift(rng_state);
@@ -255,32 +264,8 @@ std::vector<uint32_t> GpuExecutor::bootstrap_sample(size_t n_samples, uint32_t s
             uint32_t idx = rng_state % n_samples;
             indices.push_back(idx);
         }
-        
+
         return indices;
-        
-    } catch (...) {
-        std::cerr << "[GPU] Exception in GPU bootstrap, using CPU fallback" << std::endl;
-        
-        std::vector<uint32_t> indices;
-        indices.reserve(n_samples);
-        
-        auto xorshift = [](uint32_t x) -> uint32_t {
-            x ^= x << 13;
-            x ^= x >> 17;
-            x ^= x << 5;
-            return x;
-        };
-        
-        for (size_t i = 0; i < n_samples; ++i) {
-            uint32_t rng_state = seed + i * 747796405u + 2891336453u;
-            rng_state = xorshift(rng_state);
-            rng_state = xorshift(rng_state);
-            uint32_t idx = rng_state % n_samples;
-            indices.push_back(idx);
-        }
-        
-        return indices;
-    }
 }
 
 std::pair<float, float> GpuExecutor::find_best_split(
@@ -403,20 +388,19 @@ bool GpuExecutor::compile_shader(const std::string& shader_code,
         return false;
     }
     
-    try {
-        uint32_t shader_id = __wasi_webgpu_create_shader_module(
-            impl_->device_id,
-            shader_code.c_str(),
-            static_cast<uint32_t>(shader_code.size())
-        );
-        
-        std::cout << "[GPU]   Shader module ID: " << shader_id << std::endl;
-        return true;
-        
-    } catch (...) {
+    uint32_t shader_id = __wasi_webgpu_create_shader_module(
+        impl_->device_id,
+        shader_code.c_str(),
+        static_cast<uint32_t>(shader_code.size())
+    );
+
+    if (shader_id == 0) {
         std::cerr << "[GPU] Failed to compile shader" << std::endl;
         return false;
     }
+
+    std::cout << "[GPU] Shader module ID: " << shader_id << std::endl;
+    return true;
 }
 
 bool GpuExecutor::execute_compute(size_t workgroup_count_x, 
