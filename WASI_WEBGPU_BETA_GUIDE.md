@@ -57,6 +57,7 @@ This will:
 
 ```bash
 chmod +x build_webgpu_host.sh
+export CC=/usr/bin/gcc
 ./build_webgpu_host.sh
 ```
 
@@ -66,6 +67,7 @@ This builds the custom wasmtime runtime that implements wasi:webgpu.
 
 ```bash
 cd wasmwebgpu-ml
+source env.sh
 ./build.sh
 ```
 

@@ -45,10 +45,11 @@ echo ""
 echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
 echo ""
 
-# Run with custom host
+# Run with custom host - INCLUDING SHADERS DIRECTORY!
 "$HOST_BINARY" "$WASM_BINARY" \
     --dir wasmwebgpu-ml \
-    --dir wasm-ml/data
+    --dir wasm-ml/data \
+    --dir wasmwebgpu-ml/shaders
 
 EXIT_CODE=$?
 
