@@ -15,23 +15,6 @@
 // Direct wasi:webgpu Function Declarations
 // ═══════════════════════════════════════════════════════════════════════
 
-extern "C" {
-    // Instance and adapter
-    uint32_t __wasi_webgpu_create_instance();
-    uint32_t __wasi_webgpu_request_adapter(uint32_t instance, uint32_t power_preference);
-    uint32_t __wasi_webgpu_request_device(uint32_t adapter);
-    uint32_t __wasi_webgpu_get_queue(uint32_t device);
-    
-    // Buffer operations
-    uint32_t __wasi_webgpu_create_buffer(uint32_t device, uint64_t size, uint32_t usage);
-    void __wasi_webgpu_queue_write_buffer(uint32_t queue, uint32_t buffer, 
-                                          uint64_t offset, const void* data, uint32_t data_len);
-    
-    // Shader module
-    uint32_t __wasi_webgpu_create_shader_module(uint32_t device, 
-                                                const char* code, uint32_t code_len);
-}
-
 // Map C++ function names to linker names
 #pragma clang diagnostic push
 #pragma clang diagnostic ignored "-Wreturn-type-c-linkage"
