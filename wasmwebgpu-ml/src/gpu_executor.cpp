@@ -127,7 +127,7 @@ struct GpuExecutor::Impl {
     
     void load_shaders() {
         // Load WGSL shaders (mounted directly without shaders/ prefix)
-        bootstrap_shader = load_shader_file("bootstrap_sample.wgsl");
+        bootstrap_shader = load_shader_file("shaders/bootstrap_sample.wgsl");
         split_shader = load_shader_file("find_split.wgsl");
         average_shader = load_shader_file("average.wgsl");
         

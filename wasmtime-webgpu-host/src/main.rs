@@ -97,9 +97,17 @@ async fn main() -> Result<()> {
     // Add preopened directories
     for dir in &args.dirs {
         info!("Adding directory: {:?}", dir);
+        
+        // Monta ogni directory con il suo nome invece di "."
+        let mount_name = dir.file_name()
+            .and_then(|n| n.to_str())
+            .unwrap_or(".");
+        
+        info!("  Mounting as: {:?}", mount_name);
+        
         wasi_builder.preopened_dir(
             wasmtime_wasi::sync::Dir::open_ambient_dir(dir, wasmtime_wasi::sync::ambient_authority())?,
-            ".",
+            mount_name,
         )?;
     }
     let wasi_ctx = wasi_builder.build();
