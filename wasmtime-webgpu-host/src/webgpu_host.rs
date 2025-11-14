@@ -571,6 +571,7 @@ impl WebGpuHost {
         
         // Copy buffer to buffer
         let command_encoders_copy = self.command_encoders.clone();
+        let buffers_copy = self.buffers.clone(); // Clone Arc for this closure
         
         linker.func_wrap(
             "wasi:webgpu",
@@ -594,7 +595,7 @@ impl WebGpuHost {
                     }
                 };
                 
-                let buffers_map = buffers.lock().unwrap();
+                let buffers_map = buffers_copy.lock().unwrap();
                 let src_buffer = match buffers_map.get(&src_buffer_id) {
                     Some(b) => b,
                     None => {
