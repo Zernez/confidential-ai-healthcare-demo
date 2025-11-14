@@ -292,22 +292,23 @@ std::vector<uint32_t> GpuExecutor::bootstrap_sample(size_t n_samples, uint32_t s
         );
         std::cout << "[GPU]   GPU buffer ID: " << gpu_buffer << std::endl;
         
-        // Staging buffer for CPU readback (copy destination + map read)
-        uint32_t staging_buffer = __wasi_webgpu_create_buffer(
-            impl_->device_id,
-            output_size,
-            0x0009 // COPY_DST | MAP_READ
-        );
-        std::cout << "[GPU]   Staging buffer ID: " << staging_buffer << std::endl;
-
-        // Params buffer (uniform)
+        // Params buffer (uniform) - CREATE THIS SECOND so IDs are sequential!
         uint64_t params_size = sizeof(GpuParams);
         uint32_t params_buffer = __wasi_webgpu_create_buffer(
             impl_->device_id,
             params_size,
             0x0048 // UNIFORM | COPY_DST
         );
-        std::cout << "[GPU] Params buffer ID: " << params_buffer << std::endl;
+        std::cout << "[GPU]   Params buffer ID: " << params_buffer << std::endl;
+        
+        // Staging buffer for CPU readback (copy destination + map read)
+        // CREATE THIS LAST - not used in bind group
+        uint32_t staging_buffer = __wasi_webgpu_create_buffer(
+            impl_->device_id,
+            output_size,
+            0x0009 // COPY_DST | MAP_READ
+        );
+        std::cout << "[GPU]   Staging buffer ID: " << staging_buffer << std::endl;
 
         // Write parameters to buffer
         __wasi_webgpu_queue_write_buffer(
