@@ -254,17 +254,33 @@ impl WebGpuHost {
                   entries_ptr: u32| -> u32 {
                 info!("[wasi:webgpu] create-bind-group-layout (entries={})", entry_count);
                 
-                // For now, create a simple layout with storage buffers
+                // Create layout matching bootstrap shader:
+                // binding 0: Storage (read_write) - for output indices
+                // binding 1: Uniform - for parameters
                 let entries: Vec<BindGroupLayoutEntry> = (0..entry_count)
-                    .map(|i| BindGroupLayoutEntry {
-                        binding: i,
-                        visibility: ShaderStages::COMPUTE,
-                        ty: BindingType::Buffer {
-                            ty: BufferBindingType::Storage { read_only: false },
-                            has_dynamic_offset: false,
-                            min_binding_size: None,
-                        },
-                        count: None,
+                    .map(|i| {
+                        let binding_type = if i == 0 {
+                            // Binding 0: Storage buffer (read_write)
+                            BindingType::Buffer {
+                                ty: BufferBindingType::Storage { read_only: false },
+                                has_dynamic_offset: false,
+                                min_binding_size: None,
+                            }
+                        } else {
+                            // Binding 1+: Uniform buffer
+                            BindingType::Buffer {
+                                ty: BufferBindingType::Uniform,
+                                has_dynamic_offset: false,
+                                min_binding_size: None,
+                            }
+                        };
+                        
+                        BindGroupLayoutEntry {
+                            binding: i,
+                            visibility: ShaderStages::COMPUTE,
+                            ty: binding_type,
+                            count: None,
+                        }
                     })
                     .collect();
                 
