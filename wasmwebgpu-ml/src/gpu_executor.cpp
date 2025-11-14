@@ -274,12 +274,12 @@ std::vector<uint32_t> GpuExecutor::bootstrap_sample(size_t n_samples, uint32_t s
         // Step 1: Create buffers
         std::cout << "[GPU] Step 1: Creating buffers..." << std::endl;
 
-        // Output buffer for indices
+        // Output buffer for indices (needs MAP_READ for CPU readback)
         uint64_t output_size = n_samples * sizeof(uint32_t);
         uint32_t output_buffer = __wasi_webgpu_create_buffer(
-            impl_->device_id,
-            output_size,
-            0x0084 // STORAGE | COPY_SRC
+        impl_->device_id,
+        output_size,
+        0x0085 // STORAGE | COPY_SRC | MAP_READ
         );
         std::cout << "[GPU] Output buffer ID: " << output_buffer << std::endl;
 
