@@ -290,7 +290,7 @@ impl WebGpuHost {
         let compute_pipelines = self.compute_pipelines.clone();
         let bind_group_layouts = self.bind_group_layouts.clone();
         let shader_modules = self.shader_modules.clone();
-        let gpu = self.gpu.clone();
+        let gpu_cp = self.gpu.clone();
         let next_id = self.next_id.clone();
         
         linker.func_wrap(
@@ -352,14 +352,14 @@ impl WebGpuHost {
                 };
                 
                 // Create pipeline layout
-                let pipeline_layout = gpu.device().create_pipeline_layout(&PipelineLayoutDescriptor {
+                let pipeline_layout = gpu_cp.device().create_pipeline_layout(&PipelineLayoutDescriptor {
                     label: Some("WASM Pipeline Layout"),
                     bind_group_layouts: &[layout],
                     push_constant_ranges: &[],
                 });
                 
                 // Create compute pipeline
-                let pipeline = gpu.device().create_compute_pipeline(&ComputePipelineDescriptor {
+                let pipeline = gpu_cp.device().create_compute_pipeline(&ComputePipelineDescriptor {
                     label: Some("WASM Compute Pipeline"),
                     layout: Some(&pipeline_layout),
                     module: shader,
@@ -384,6 +384,7 @@ impl WebGpuHost {
         let bind_group_layouts = self.bind_group_layouts.clone();
         let buffers = self.buffers.clone();
         let next_id = self.next_id.clone();
+        let gpu_bg = self.gpu.clone();
         
         linker.func_wrap(
             "wasi:webgpu",
@@ -421,7 +422,7 @@ impl WebGpuHost {
                     }
                 }
                 
-                let bind_group = gpu.device().create_bind_group(&BindGroupDescriptor {
+                let bind_group = gpu_bg.device().create_bind_group(&BindGroupDescriptor {
                     label: Some("WASM Bind Group"),
                     layout,
                     entries: &entries,
