@@ -364,8 +364,6 @@ impl WebGpuHost {
                     layout: Some(&pipeline_layout),
                     module: shader,
                     entry_point,
-                    compilation_options: Default::default(),
-                    cache: None,
                 });
                 
                 let id = {
@@ -423,7 +421,7 @@ impl WebGpuHost {
                     }
                 }
                 
-                let bind_group = layout.device().create_bind_group(&BindGroupDescriptor {
+                let bind_group = gpu.device().create_bind_group(&BindGroupDescriptor {
                     label: Some("WASM Bind Group"),
                     layout,
                     entries: &entries,
