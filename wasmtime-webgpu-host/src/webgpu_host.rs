@@ -569,6 +569,53 @@ impl WebGpuHost {
             },
         )?;
         
+        // Copy buffer to buffer
+        let command_encoders_copy = self.command_encoders.clone();
+        
+        linker.func_wrap(
+            "wasi:webgpu",
+            "copy-buffer-to-buffer",
+            move |_caller: Caller<'_, HostState>,
+                  encoder_id: u32,
+                  src_buffer_id: u32,
+                  src_offset: u64,
+                  dst_buffer_id: u32,
+                  dst_offset: u64,
+                  size: u64| {
+                info!("[wasi:webgpu] copy-buffer-to-buffer (src={}, dst={}, size={})", 
+                      src_buffer_id, dst_buffer_id, size);
+                
+                let mut encoders = command_encoders_copy.lock().unwrap();
+                let encoder = match encoders.get_mut(&encoder_id) {
+                    Some(e) => e,
+                    None => {
+                        info!("  ERROR: Invalid encoder ID");
+                        return;
+                    }
+                };
+                
+                let buffers_map = buffers.lock().unwrap();
+                let src_buffer = match buffers_map.get(&src_buffer_id) {
+                    Some(b) => b,
+                    None => {
+                        info!("  ERROR: Invalid source buffer ID");
+                        return;
+                    }
+                };
+                
+                let dst_buffer = match buffers_map.get(&dst_buffer_id) {
+                    Some(b) => b,
+                    None => {
+                        info!("  ERROR: Invalid destination buffer ID");
+                        return;
+                    }
+                };
+                
+                encoder.copy_buffer_to_buffer(src_buffer, src_offset, dst_buffer, dst_offset, size);
+                info!("  Buffer copy command added to encoder");
+            },
+        )?;
+        
         // Buffer map async (simplified - just polls device)
         let gpu = self.gpu.clone();
         let buffers = self.buffers.clone();
@@ -668,7 +715,7 @@ impl WebGpuHost {
             },
         )?;
         
-        info!("{} wasi:webgpu functions registered", 17);
+        info!("{} wasi:webgpu functions registered", 18);
         
         Ok(())
     }
