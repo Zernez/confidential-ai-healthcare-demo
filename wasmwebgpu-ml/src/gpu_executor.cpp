@@ -335,8 +335,8 @@ std::vector<uint32_t> GpuExecutor::bootstrap_sample(size_t n_samples, uint32_t s
 
                 // Step 4: Create compute pipeline
                 std::cout << "[GPU] Step 4: Creating compute pipeline..." << std::endl;
-
-                const char* entry_point = "bootstrap_sample";
+                
+                const char* entry_point = "main";
                 uint32_t compute_pipeline = __wasi_webgpu_create_compute_pipeline(
                     impl_->device_id,
                     shader_module,
@@ -353,13 +353,16 @@ std::vector<uint32_t> GpuExecutor::bootstrap_sample(size_t n_samples, uint32_t s
 
                     // Step 5: Create bind group
                     std::cout << "[GPU] Step 5: Creating bind group..." << std::endl;
-
+                    
+                    // IMPORTANT: Pass output_buffer first to match shader binding order:
+                    // @binding(0) = indices (output_buffer)
+                    // @binding(1) = params (params_buffer)
                     uint32_t bind_group = __wasi_webgpu_create_bind_group(
-                        impl_->device_id,
+                    impl_->device_id,
                         bind_group_layout,
-                        2, // 2 buffers
-                        params_buffer // First buffer ID (assumes sequential IDs for simplicity)
-                    );
+        2, // 2 buffers
+        output_buffer // First buffer ID - MUST be output_buffer for binding 0!
+    );
                     std::cout << "[GPU]   Bind group ID: " << bind_group << std::endl;
 
                     // Step 6: Create command encoder
@@ -371,8 +374,8 @@ std::vector<uint32_t> GpuExecutor::bootstrap_sample(size_t n_samples, uint32_t s
                     // Step 7: Dispatch compute
                     std::cout << "[GPU] Step 7: Dispatching compute shader..." << std::endl;
 
-                    // Calculate workgroup count (64 threads per workgroup)
-                    uint32_t workgroup_size = 64;
+                    // Calculate workgroup count (256 threads per workgroup - matches WGSL)
+                    uint32_t workgroup_size = 256;
                     uint32_t workgroup_count = (static_cast<uint32_t>(n_samples) + workgroup_size - 1) / workgroup_size;
 
                     __wasi_webgpu_dispatch_compute(
