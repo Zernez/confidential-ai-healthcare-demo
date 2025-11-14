@@ -95,6 +95,15 @@ extern "C" {
     __attribute__((import_name("submit-commands")))
     void __wasi_webgpu_submit_commands(uint32_t queue, uint32_t encoder_id);
     
+    __attribute__((import_module("wasi:webgpu")))
+    __attribute__((import_name("copy-buffer-to-buffer")))
+    void __wasi_webgpu_copy_buffer_to_buffer(uint32_t encoder,
+                                             uint32_t src_buffer,
+                                             uint64_t src_offset,
+                                             uint32_t dst_buffer,
+                                             uint64_t dst_offset,
+                                             uint64_t size);
+    
     // Buffer mapping for readback (3 functions)
     __attribute__((import_module("wasi:webgpu")))
     __attribute__((import_name("buffer-map-async")))
@@ -274,14 +283,22 @@ std::vector<uint32_t> GpuExecutor::bootstrap_sample(size_t n_samples, uint32_t s
         // Step 1: Create buffers
         std::cout << "[GPU] Step 1: Creating buffers..." << std::endl;
 
-        // Output buffer for indices (needs MAP_READ for CPU readback)
+        // GPU buffer for indices (storage + copy source)
         uint64_t output_size = n_samples * sizeof(uint32_t);
-        uint32_t output_buffer = __wasi_webgpu_create_buffer(
-        impl_->device_id,
-        output_size,
-        0x0085 // STORAGE | COPY_SRC | MAP_READ
+        uint32_t gpu_buffer = __wasi_webgpu_create_buffer(
+            impl_->device_id,
+            output_size,
+            0x0084 // STORAGE | COPY_SRC
         );
-        std::cout << "[GPU] Output buffer ID: " << output_buffer << std::endl;
+        std::cout << "[GPU]   GPU buffer ID: " << gpu_buffer << std::endl;
+        
+        // Staging buffer for CPU readback (copy destination + map read)
+        uint32_t staging_buffer = __wasi_webgpu_create_buffer(
+            impl_->device_id,
+            output_size,
+            0x0009 // COPY_DST | MAP_READ
+        );
+        std::cout << "[GPU]   Staging buffer ID: " << staging_buffer << std::endl;
 
         // Params buffer (uniform)
         uint64_t params_size = sizeof(GpuParams);
@@ -354,15 +371,15 @@ std::vector<uint32_t> GpuExecutor::bootstrap_sample(size_t n_samples, uint32_t s
                     // Step 5: Create bind group
                     std::cout << "[GPU] Step 5: Creating bind group..." << std::endl;
                     
-                    // IMPORTANT: Pass output_buffer first to match shader binding order:
-                    // @binding(0) = indices (output_buffer)
+                    // IMPORTANT: Pass gpu_buffer first to match shader binding order:
+                    // @binding(0) = indices (gpu_buffer)
                     // @binding(1) = params (params_buffer)
                     uint32_t bind_group = __wasi_webgpu_create_bind_group(
-                    impl_->device_id,
+                        impl_->device_id,
                         bind_group_layout,
-        2, // 2 buffers
-        output_buffer // First buffer ID - MUST be output_buffer for binding 0!
-    );
+                        2, // 2 buffers
+                        gpu_buffer // First buffer ID - MUST be gpu_buffer for binding 0!
+                    );
                     std::cout << "[GPU]   Bind group ID: " << bind_group << std::endl;
 
                     // Step 6: Create command encoder
@@ -388,38 +405,54 @@ std::vector<uint32_t> GpuExecutor::bootstrap_sample(size_t n_samples, uint32_t s
                     );
                     std::cout << "[GPU]   Dispatched " << workgroup_count << " workgroups" << std::endl;
 
-                    // Step 8: Submit commands
-                    std::cout << "[GPU] Step 8: Submitting commands to GPU..." << std::endl;
+                    // Step 8: Copy from GPU buffer to staging buffer
+                    std::cout << "[GPU] Step 8: Copying GPU buffer to staging buffer..." << std::endl;
+                    
+                    __wasi_webgpu_copy_buffer_to_buffer(
+                        command_encoder,
+                        gpu_buffer,      // source
+                        0,               // src offset
+                        staging_buffer,  // destination
+                        0,               // dst offset
+                        output_size      // size
+                    );
+                    std::cout << "[GPU]   Copy command added" << std::endl;
+
+                    // Step 9: Submit commands
+                    std::cout << "[GPU] Step 9: Submitting commands to GPU..." << std::endl;
 
                     __wasi_webgpu_submit_commands(impl_->queue_id, command_encoder);
-                    std::cout << "[GPU] Commands submitted" << std::endl;
+                    std::cout << "[GPU]   Commands submitted" << std::endl;
 
-                    // Step 9: Map buffer for reading
-                    std::cout << "[GPU] Step 9: Mapping buffer for readback..." << std::endl;
+                    // Step 10: Map staging buffer for reading
+                    std::cout << "[GPU] Step 10: Mapping staging buffer for readback..." << std::endl;
 
                     __wasi_webgpu_buffer_map_async(
-                        output_buffer,
+                        staging_buffer,
                         1, // READ mode
                         0,
                         output_size,
                         0, // callback_ptr (not used)
                         0  // callback_len (not used)
                     );
-                    std::cout << "[GPU] Buffer mapped" << std::endl;
+                    std::cout << "[GPU]   Staging buffer mapped" << std::endl;
 
-                    // Step 10: Read results
-                    std::cout << "[GPU] Step 10: Reading results..." << std::endl;
+                    // Step 11: Read results from staging buffer
+                    std::cout << "[GPU] Step 11: Reading results from staging buffer..." << std::endl;
 
                     indices.resize(n_samples);
                     __wasi_webgpu_buffer_get_mapped_range(
-                        output_buffer,
+                        staging_buffer,
                         0,
                         output_size,
                         reinterpret_cast<uint32_t>(indices.data())
                     );
+                    std::cout << "[GPU]   Read " << indices.size() << " indices" << std::endl;
 
-                    // Step 11: Unmap buffer
-                    __wasi_webgpu_buffer_unmap(output_buffer);
+                    // Step 12: Unmap staging buffer
+                    std::cout << "[GPU] Step 12: Unmapping staging buffer..." << std::endl;
+                    __wasi_webgpu_buffer_unmap(staging_buffer);
+                    std::cout << "[GPU]   Staging buffer unmapped" << std::endl;
 
                     std::cout << "[GPU] GPU pipeline completed successfully!" << std::endl;
                     std::cout << "[GPU] Generated " << indices.size() << " bootstrap indices" << std::endl;
