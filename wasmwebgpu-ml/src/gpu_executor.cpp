@@ -245,213 +245,197 @@ bool GpuExecutor::is_available() const {
 std::vector<uint32_t> GpuExecutor::bootstrap_sample(size_t n_samples, uint32_t seed) {
     std::cout << "[GPU] bootstrap_sample (n_samples=" << n_samples 
               << ", seed=" << seed << ")" << std::endl;
-    
-    if (!available_) {
-        // CPU fallback
-        std::vector<uint32_t> indices;
-        indices.reserve(n_samples);
-        
-        auto xorshift = [](uint32_t x) -> uint32_t {
-            x ^= x << 13;
-            x ^= x >> 17;
-            x ^= x << 5;
-            return x;
-        };
-        
-        for (size_t i = 0; i < n_samples; ++i) {
-            uint32_t rng_state = seed + i * 747796405u + 2891336453u;
-            rng_state = xorshift(rng_state);
-            rng_state = xorshift(rng_state);
-            uint32_t idx = rng_state % n_samples;
-            indices.push_back(idx);
-        }
-        
-        return indices;
-    }
-    
-    // ═══════════════════════════════════════════════════════════════════════
-    // COMPLETE GPU PIPELINE IMPLEMENTATION
-    // ═══════════════════════════════════════════════════════════════════════
-    
-    std::cout << "[GPU] Executing COMPLETE GPU pipeline..." << std::endl;
-    
-    // Parameters struct to pass to GPU
-    struct GpuParams {
-        uint32_t n_samples;
-        uint32_t seed;
-        uint32_t padding[2]; // Align to 16 bytes
-    };
-    
-    GpuParams params;
-    params.n_samples = static_cast<uint32_t>(n_samples);
-    params.seed = seed;
-    params.padding[0] = 0;
-    params.padding[1] = 0;
-    
-    // Step 1: Create buffers
-    std::cout << "[GPU] Step 1: Creating buffers..." << std::endl;
-    
-    // Output buffer for indices
-    uint64_t output_size = n_samples * sizeof(uint32_t);
-    uint32_t output_buffer = __wasi_webgpu_create_buffer(
-        impl_->device_id,
-        output_size,
-        0x0084 // STORAGE | COPY_SRC
-    );
-    std::cout << "[GPU] Output buffer ID: " << output_buffer << std::endl;
-    
-    // Params buffer (uniform)
-    uint64_t params_size = sizeof(GpuParams);
-    uint32_t params_buffer = __wasi_webgpu_create_buffer(
-        impl_->device_id,
-        params_size,
-        0x0048 // UNIFORM | COPY_DST
-    );
-    std::cout << "[GPU] Params buffer ID: " << params_buffer << std::endl;
-    
-    // Write parameters to buffer
-    __wasi_webgpu_queue_write_buffer(
-        impl_->queue_id,
-        params_buffer,
-        0,
-        &params,
-        sizeof(GpuParams)
-    );
-    std::cout << "[GPU]   Parameters written to buffer" << std::endl;
-    
-    // Step 2: Create shader module
-    std::cout << "[GPU] Step 2: Creating shader module..." << std::endl;
-    
-    if (impl_->bootstrap_shader.empty()) {
-        std::cerr << "[GPU] Bootstrap shader not loaded, falling back to CPU" << std::endl;
-        goto cpu_fallback;
-    }
-    
-    uint32_t shader_module = __wasi_webgpu_create_shader_module(
-        impl_->device_id,
-        impl_->bootstrap_shader.c_str(),
-        static_cast<uint32_t>(impl_->bootstrap_shader.size())
-    );
-    
-    if (shader_module == 0) {
-        std::cerr << "[GPU] Failed to create shader module, falling back to CPU" << std::endl;
-        goto cpu_fallback;
-    }
-    std::cout << "[GPU] Shader module ID: " << shader_module << std::endl;
-    
-    // Step 3: Create bind group layout
-    std::cout << "[GPU] Step 3: Creating bind group layout..." << std::endl;
-    
-    uint32_t bind_group_layout = __wasi_webgpu_create_bind_group_layout(
-        impl_->device_id,
-        2, // 2 bindings: params (uniform) and output (storage)
-        0  // entries_ptr not used in simplified implementation
-    );
-    std::cout << "[GPU] Bind group layout ID: " << bind_group_layout << std::endl;
-    
-    // Step 4: Create compute pipeline
-    std::cout << "[GPU] Step 4: Creating compute pipeline..." << std::endl;
-    
-    const char* entry_point = "bootstrap_sample";
-    uint32_t compute_pipeline = __wasi_webgpu_create_compute_pipeline(
-        impl_->device_id,
-        shader_module,
-        entry_point,
-        std::strlen(entry_point),
-        bind_group_layout
-    );
-    
-    if (compute_pipeline == 0) {
-        std::cerr << "[GPU] Failed to create compute pipeline, falling back to CPU" << std::endl;
-        goto cpu_fallback;
-    }
-    std::cout << "[GPU]   Compute pipeline ID: " << compute_pipeline << std::endl;
-    
-    // Step 5: Create bind group
-    std::cout << "[GPU] Step 5: Creating bind group..." << std::endl;
-    
-    uint32_t bind_group = __wasi_webgpu_create_bind_group(
-        impl_->device_id,
-        bind_group_layout,
-        2, // 2 buffers
-        params_buffer // First buffer ID (assumes sequential IDs for simplicity)
-    );
-    std::cout << "[GPU]   Bind group ID: " << bind_group << std::endl;
-    
-    // Step 6: Create command encoder
-    std::cout << "[GPU] Step 6: Creating command encoder..." << std::endl;
-    
-    uint32_t command_encoder = __wasi_webgpu_create_command_encoder(impl_->device_id);
-    std::cout << "[GPU] Command encoder ID: " << command_encoder << std::endl;
-    
-    // Step 7: Dispatch compute
-    std::cout << "[GPU] Step 7: Dispatching compute shader..." << std::endl;
-    
-    // Calculate workgroup count (64 threads per workgroup)
-    uint32_t workgroup_size = 64;
-    uint32_t workgroup_count = (static_cast<uint32_t>(n_samples) + workgroup_size - 1) / workgroup_size;
-    
-    __wasi_webgpu_dispatch_compute(
-        command_encoder,
-        compute_pipeline,
-        bind_group,
-        workgroup_count,
-        1,
-        1
-    );
-    std::cout << "[GPU]   Dispatched " << workgroup_count << " workgroups" << std::endl;
-    
-    // Step 8: Submit commands
-    std::cout << "[GPU] Step 8: Submitting commands to GPU..." << std::endl;
-    
-    __wasi_webgpu_submit_commands(impl_->queue_id, command_encoder);
-    std::cout << "[GPU] Commands submitted" << std::endl;
-    
-    // Step 9: Map buffer for reading
-    std::cout << "[GPU] Step 9: Mapping buffer for readback..." << std::endl;
-    
-    __wasi_webgpu_buffer_map_async(
-        output_buffer,
-        1, // READ mode
-        0,
-        output_size,
-        0, // callback_ptr (not used)
-        0  // callback_len (not used)
-    );
-    std::cout << "[GPU] Buffer mapped" << std::endl;
-    
-    // Step 10: Read results
-    std::cout << "[GPU] Step 10: Reading results..." << std::endl;
-    
-    std::vector<uint32_t> indices(n_samples);
-    __wasi_webgpu_buffer_get_mapped_range(
-        output_buffer,
-        0,
-        output_size,
-        reinterpret_cast<uint32_t>(indices.data())
-    );
-    
-    // Step 11: Unmap buffer
-    __wasi_webgpu_buffer_unmap(output_buffer);
-    
-    std::cout << "[GPU] GPU pipeline completed successfully!" << std::endl;
-    std::cout << "[GPU] Generated " << indices.size() << " bootstrap indices" << std::endl;
-    
-    return indices;
-    
-cpu_fallback:
-    std::cerr << "[GPU] Falling back to CPU implementation" << std::endl;
-    
+
     std::vector<uint32_t> indices;
     indices.reserve(n_samples);
-    
+
+    bool gpu_ok = available_;
+
+    if (gpu_ok) {
+        // ═══════════════════════════════════════════════════════════════════════
+        // COMPLETE GPU PIPELINE IMPLEMENTATION
+        // ═══════════════════════════════════════════════════════════════════════
+
+        std::cout << "[GPU] Executing COMPLETE GPU pipeline..." << std::endl;
+
+        // Parameters struct to pass to GPU
+        struct GpuParams {
+            uint32_t n_samples;
+            uint32_t seed;
+            uint32_t padding[2]; // Align to 16 bytes
+        };
+
+        GpuParams params;
+        params.n_samples = static_cast<uint32_t>(n_samples);
+        params.seed = seed;
+        params.padding[0] = 0;
+        params.padding[1] = 0;
+
+        // Step 1: Create buffers
+        std::cout << "[GPU] Step 1: Creating buffers..." << std::endl;
+
+        // Output buffer for indices
+        uint64_t output_size = n_samples * sizeof(uint32_t);
+        uint32_t output_buffer = __wasi_webgpu_create_buffer(
+            impl_->device_id,
+            output_size,
+            0x0084 // STORAGE | COPY_SRC
+        );
+        std::cout << "[GPU] Output buffer ID: " << output_buffer << std::endl;
+
+        // Params buffer (uniform)
+        uint64_t params_size = sizeof(GpuParams);
+        uint32_t params_buffer = __wasi_webgpu_create_buffer(
+            impl_->device_id,
+            params_size,
+            0x0048 // UNIFORM | COPY_DST
+        );
+        std::cout << "[GPU] Params buffer ID: " << params_buffer << std::endl;
+
+        // Write parameters to buffer
+        __wasi_webgpu_queue_write_buffer(
+            impl_->queue_id,
+            params_buffer,
+            0,
+            &params,
+            sizeof(GpuParams)
+        );
+        std::cout << "[GPU]   Parameters written to buffer" << std::endl;
+
+        // Step 2: Create shader module
+        std::cout << "[GPU] Step 2: Creating shader module..." << std::endl;
+
+        if (impl_->bootstrap_shader.empty()) {
+            std::cerr << "[GPU] Bootstrap shader not loaded, falling back to CPU" << std::endl;
+            gpu_ok = false;
+        }
+
+        if (gpu_ok) {
+            uint32_t shader_module = __wasi_webgpu_create_shader_module(
+                impl_->device_id,
+                impl_->bootstrap_shader.c_str(),
+                static_cast<uint32_t>(impl_->bootstrap_shader.size())
+            );
+
+            if (shader_module == 0) {
+                std::cerr << "[GPU] Failed to create shader module, falling back to CPU" << std::endl;
+                gpu_ok = false;
+            } else {
+                std::cout << "[GPU] Shader module ID: " << shader_module << std::endl;
+
+                // Step 3: Create bind group layout
+                std::cout << "[GPU] Step 3: Creating bind group layout..." << std::endl;
+
+                uint32_t bind_group_layout = __wasi_webgpu_create_bind_group_layout(
+                    impl_->device_id,
+                    2, // 2 bindings: params (uniform) and output (storage)
+                    0  // entries_ptr not used in simplified implementation
+                );
+                std::cout << "[GPU] Bind group layout ID: " << bind_group_layout << std::endl;
+
+                // Step 4: Create compute pipeline
+                std::cout << "[GPU] Step 4: Creating compute pipeline..." << std::endl;
+
+                const char* entry_point = "bootstrap_sample";
+                uint32_t compute_pipeline = __wasi_webgpu_create_compute_pipeline(
+                    impl_->device_id,
+                    shader_module,
+                    entry_point,
+                    std::strlen(entry_point),
+                    bind_group_layout
+                );
+
+                if (compute_pipeline == 0) {
+                    std::cerr << "[GPU] Failed to create compute pipeline, falling back to CPU" << std::endl;
+                    gpu_ok = false;
+                } else {
+                    std::cout << "[GPU]   Compute pipeline ID: " << compute_pipeline << std::endl;
+
+                    // Step 5: Create bind group
+                    std::cout << "[GPU] Step 5: Creating bind group..." << std::endl;
+
+                    uint32_t bind_group = __wasi_webgpu_create_bind_group(
+                        impl_->device_id,
+                        bind_group_layout,
+                        2, // 2 buffers
+                        params_buffer // First buffer ID (assumes sequential IDs for simplicity)
+                    );
+                    std::cout << "[GPU]   Bind group ID: " << bind_group << std::endl;
+
+                    // Step 6: Create command encoder
+                    std::cout << "[GPU] Step 6: Creating command encoder..." << std::endl;
+
+                    uint32_t command_encoder = __wasi_webgpu_create_command_encoder(impl_->device_id);
+                    std::cout << "[GPU] Command encoder ID: " << command_encoder << std::endl;
+
+                    // Step 7: Dispatch compute
+                    std::cout << "[GPU] Step 7: Dispatching compute shader..." << std::endl;
+
+                    // Calculate workgroup count (64 threads per workgroup)
+                    uint32_t workgroup_size = 64;
+                    uint32_t workgroup_count = (static_cast<uint32_t>(n_samples) + workgroup_size - 1) / workgroup_size;
+
+                    __wasi_webgpu_dispatch_compute(
+                        command_encoder,
+                        compute_pipeline,
+                        bind_group,
+                        workgroup_count,
+                        1,
+                        1
+                    );
+                    std::cout << "[GPU]   Dispatched " << workgroup_count << " workgroups" << std::endl;
+
+                    // Step 8: Submit commands
+                    std::cout << "[GPU] Step 8: Submitting commands to GPU..." << std::endl;
+
+                    __wasi_webgpu_submit_commands(impl_->queue_id, command_encoder);
+                    std::cout << "[GPU] Commands submitted" << std::endl;
+
+                    // Step 9: Map buffer for reading
+                    std::cout << "[GPU] Step 9: Mapping buffer for readback..." << std::endl;
+
+                    __wasi_webgpu_buffer_map_async(
+                        output_buffer,
+                        1, // READ mode
+                        0,
+                        output_size,
+                        0, // callback_ptr (not used)
+                        0  // callback_len (not used)
+                    );
+                    std::cout << "[GPU] Buffer mapped" << std::endl;
+
+                    // Step 10: Read results
+                    std::cout << "[GPU] Step 10: Reading results..." << std::endl;
+
+                    indices.resize(n_samples);
+                    __wasi_webgpu_buffer_get_mapped_range(
+                        output_buffer,
+                        0,
+                        output_size,
+                        reinterpret_cast<uint32_t>(indices.data())
+                    );
+
+                    // Step 11: Unmap buffer
+                    __wasi_webgpu_buffer_unmap(output_buffer);
+
+                    std::cout << "[GPU] GPU pipeline completed successfully!" << std::endl;
+                    std::cout << "[GPU] Generated " << indices.size() << " bootstrap indices" << std::endl;
+                    return indices;
+                }
+            }
+        }
+    }
+
+    // CPU fallback
+    std::cerr << "[GPU] Falling back to CPU implementation" << std::endl;
+
     auto xorshift = [](uint32_t x) -> uint32_t {
         x ^= x << 13;
         x ^= x >> 17;
         x ^= x << 5;
         return x;
     };
-    
+
     for (size_t i = 0; i < n_samples; ++i) {
         uint32_t rng_state = seed + i * 747796405u + 2891336453u;
         rng_state = xorshift(rng_state);
@@ -459,7 +443,7 @@ cpu_fallback:
         uint32_t idx = rng_state % n_samples;
         indices.push_back(idx);
     }
-    
+
     return indices;
 }
 
