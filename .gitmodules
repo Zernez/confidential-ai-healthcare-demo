@@ -1,0 +1,3 @@
+[submodule "attestation-rs"]
+	path = attestation-rs
+	url = https://github.com/Zernez/attestation-rs.git
