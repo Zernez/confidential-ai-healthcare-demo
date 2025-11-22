@@ -435,8 +435,8 @@ impl TeeHost {
     async fn attest_tdx(&self) -> Result<AttestationResult> {
         // Use the attestation module functions
         let report_data = vec![0u8; 64];
-        let quote = lunal_attestation::attestation::get_raw_attestation_report()
-            .context("Failed to generate TDX quote")?;
+            let quote = lunal_attestation::attestation::get_raw_attestation_report()
+                .map_err(|e| anyhow::anyhow!(format!("Failed to generate TDX quote: {}", e)))?;
         
         let evidence_json = serde_json::json!({
             "tee_type": "TDX",
