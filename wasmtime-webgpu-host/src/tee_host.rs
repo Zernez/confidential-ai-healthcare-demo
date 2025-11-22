@@ -15,6 +15,10 @@ use serde::{Deserialize, Serialize};
 use std::sync::{Arc, Mutex};
 use wasmtime::{Caller, Linker};
 
+// Conditional import based on features
+#[cfg(feature = "lunal-attestation")]
+use lunal_attestation;
+
 /// Attestation result returned to WASM guest
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AttestationResult {

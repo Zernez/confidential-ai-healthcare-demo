@@ -26,7 +26,15 @@ serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
 
 # Attestation
-lunal-attestation = { path = "../attestation-rs/lunal-attestation", features = ["attestation-tdx", "attestation", "attestation-nvidia"] }
+lunal-attestation = { path = "../attestation-rs/lunal-attestation", optional = true }
+
+[features]
+default = []
+# Attestation features (map to lunal-attestation features)
+attestation-tdx = ["lunal-attestation", "lunal-attestation/attestation-tdx"]
+attestation = ["lunal-attestation", "lunal-attestation/attestation"]
+attestation-nvidia = ["lunal-attestation", "lunal-attestation/attestation-nvidia"]
+attestation-all = ["attestation-tdx", "attestation", "attestation-nvidia"]
 
 [[bin]]
 name = "wasmtime-webgpu-host"
