@@ -13,8 +13,10 @@ use log::info;
 
 mod webgpu_host;
 mod gpu_backend;
+mod tee_host;
 
 use webgpu_host::WebGpuHost;
+use tee_host::TeeHost;
 
 /// Command line arguments
 #[derive(Debug)]
@@ -54,7 +56,9 @@ async fn main() -> Result<()> {
         .init();
     
     info!("╔════════════════════════════════════════════════╗");
-    info!("║  Wasmtime with wasi:webgpu Support (Beta)     ║");
+    info!("║  Wasmtime with TEE Attestation + WebGPU       ║");
+    info!("║  • wasi:webgpu (GPU compute)                  ║");
+    info!("║  • wasmtime:attestation (VM + GPU)            ║");
     info!("╚════════════════════════════════════════════════╝");
     
     // Parse arguments
@@ -90,6 +94,15 @@ async fn main() -> Result<()> {
     
     info!("✓ wasi:webgpu functions registered");
     
+    // Create TEE attestation host
+    info!("Initializing TEE attestation...");
+    let tee_host = TeeHost::new();
+    
+    // Register wasmtime:attestation functions
+    tee_host.register_functions(&mut linker)?;
+    
+    info!("✓ wasmtime:attestation functions registered");
+    
     // Create store with host state
     let mut wasi_builder = WasiCtxBuilder::new();
     wasi_builder.inherit_stdio();
@@ -117,6 +130,7 @@ async fn main() -> Result<()> {
         HostState {
             wasi: wasi_ctx,
             webgpu: webgpu_host,
+            tee: tee_host,
         },
     );
     
@@ -149,8 +163,9 @@ async fn main() -> Result<()> {
     Ok(())
 }
 
-/// Host state containing WASI context and WebGPU implementation
+/// Host state containing WASI context, WebGPU, and TEE attestation
 struct HostState {
     wasi: WasiCtx,
     webgpu: WebGpuHost,
+    tee: TeeHost,
 }

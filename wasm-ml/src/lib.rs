@@ -13,6 +13,9 @@ pub mod gpu_compute;
 pub mod gpu_training;  // NEW: GPU training module
 pub mod data;
 
+#[cfg(target_arch = "wasm32")]
+pub mod attestation;  // TEE attestation bindings
+
 use random_forest::RandomForest;
 use data::Dataset;
 
