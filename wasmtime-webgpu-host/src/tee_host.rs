@@ -140,29 +140,17 @@ impl TeeHost {
         }
 
         // Try SEV-SNP
-        #[cfg(feature = "attestation")]
-        {
-            debug!("Attempting SEV-SNP attestation...");
-            match self.attest_sev_snp().await {
-                Ok(result) => {
-                    info!("✓ SEV-SNP attestation successful");
-                    // Cache the token
-                    if let Some(token) = &result.token {
-                        let mut cache = self.vm_token_cache.lock().unwrap();
-                        *cache = Some(token.clone());
-                    }
-                    return Ok(result);
-                }
-                Err(e) => {
-                    debug!("SEV-SNP attestation failed: {}", e);
-                }
-            }
-        }
+        // Disabled: requires TPM libraries
+        // #[cfg(feature = "attestation")]
+        // {
+        //     debug!("Attempting SEV-SNP attestation...");
+        //     ...
+        // }
 
         // No TEE available
-        error!("❌ No TEE attestation available (neither TDX nor SEV-SNP)");
+        error!("❌ No TEE attestation available (TDX not found)");
         Ok(AttestationResult::failure(
-            "No TEE attestation available. Not running in confidential VM?".to_string()
+            "No TEE attestation available. Not running in Intel TDX confidential VM?".to_string()
         ))
     }
 
@@ -187,18 +175,17 @@ impl TeeHost {
             match lunal_attestation::nvidia::attest::attest_remote_token(
                 gpu_index,
                 None, // Use default nonce
-                self.nras_endpoint.as_deref(),
+                self.nras_endpoint.clone(), // Clone the Option<String>
             ).await {
-                Ok(token_info) => {
+                Ok(token) => {
                     info!("✓ GPU attestation successful");
-                    info!("  Token subject: {:?}", token_info.subject);
-                    info!("  Token expires: {} seconds", token_info.time_until_expiration());
+                    info!("  Token length: {} chars", token.len());
                     
                     // Cache the token
                     let mut cache = self.gpu_token_cache.lock().unwrap();
-                    *cache = Some(token_info.token.clone());
+                    *cache = Some(token.clone());
                     
-                    Ok(AttestationResult::success(token_info.token))
+                    Ok(AttestationResult::success(token))
                 }
                 Err(e) => {
                     error!("❌ GPU attestation failed: {}", e);
@@ -237,22 +224,12 @@ impl TeeHost {
             }
         }
 
-        #[cfg(feature = "attestation")]
-        {
-            debug!("Collecting SEV-SNP evidence...");
-            match self.collect_sev_evidence().await {
-                Ok(evidence_json) => {
-                    info!("✓ SEV-SNP evidence collected");
-                    return Ok(AttestationResult::with_evidence(
-                        "evidence-only".to_string(),
-                        evidence_json,
-                    ));
-                }
-                Err(e) => {
-                    debug!("SEV-SNP evidence collection failed: {}", e);
-                }
-            }
-        }
+        // Disabled: SEV-SNP requires TPM
+        // #[cfg(feature = "attestation")]
+        // {
+        //     debug!("Collecting SEV-SNP evidence...");
+        //     ...
+        // }
 
         error!("❌ No TEE evidence available");
         Ok(AttestationResult::failure("No TEE available".to_string()))
@@ -264,7 +241,7 @@ impl TeeHost {
 
         #[cfg(feature = "attestation-nvidia")]
         {
-            match lunal_attestation::nvidia::attest::collect_gpu_evidence(gpu_index, None).await {
+            match lunal_attestation::nvidia::attest::collect_evidence(gpu_index, None) {
                 Ok(evidence) => {
                     info!("✓ GPU evidence collected");
                     let evidence_json = evidence.to_json_pretty()
@@ -364,11 +341,11 @@ impl TeeHost {
         linker.func_wrap(
             "wasmtime_attestation",
             "verify_token",
-            |caller: Caller<'_, T>, token_ptr: i32, token_len: i32| -> i32 {
+            |mut caller: Caller<'_, T>, token_ptr: i32, token_len: i32| -> i32 {
                 debug!("[WASM] verify_token() called");
                 
                 // Read token from WASM memory
-                match Self::read_string_from_wasm(&caller, token_ptr, token_len) {
+                match Self::read_string_from_wasm(&mut caller, token_ptr, token_len) {
                     Ok(token) => {
                         // Basic verification
                         let parts: Vec<&str> = token.split('.').collect();
@@ -428,7 +405,7 @@ impl TeeHost {
     }
 
     /// Helper: Read string from WASM memory
-    fn read_string_from_wasm<T>(caller: &Caller<'_, T>, ptr: i32, len: i32) -> Result<String> {
+    fn read_string_from_wasm<T>(caller: &mut Caller<'_, T>, ptr: i32, len: i32) -> Result<String> {
         if ptr < 0 || len < 0 {
             anyhow::bail!("Invalid pointer or length");
         }
@@ -456,18 +433,14 @@ impl TeeHost {
 
     #[cfg(feature = "attestation-tdx")]
     async fn attest_tdx(&self) -> Result<AttestationResult> {
-        use lunal_attestation::attestation::tdx;
-        
-        // Generate TDX quote
-        let report_data = vec![0u8; 64]; // User data to include in quote
-        let quote = tdx::get_quote(&report_data)
+        // Use the attestation module functions
+        let report_data = vec![0u8; 64];
+        let quote = lunal_attestation::attestation::get_raw_attestation_report()
             .context("Failed to generate TDX quote")?;
         
-        // For now, return quote as evidence (no remote attestation yet)
         let evidence_json = serde_json::json!({
             "tee_type": "TDX",
             "quote": hex::encode(&quote),
-            "report_data": hex::encode(&report_data),
         }).to_string();
         
         // TODO: Send to remote attestation service
@@ -477,6 +450,8 @@ impl TeeHost {
         ))
     }
 
+    // SEV-SNP functions disabled (require TPM)
+    /*
     #[cfg(feature = "attestation")]
     async fn attest_sev_snp(&self) -> Result<AttestationResult> {
         use lunal_attestation::attestation::sev_snp;
@@ -498,13 +473,11 @@ impl TeeHost {
             evidence_json,
         ))
     }
+    */
 
     #[cfg(feature = "attestation-tdx")]
     async fn collect_tdx_evidence(&self) -> Result<String> {
-        use lunal_attestation::attestation::tdx;
-        
-        let report_data = vec![0u8; 64];
-        let quote = tdx::get_quote(&report_data)?;
+        let quote = lunal_attestation::attestation::get_raw_attestation_report()?;
         
         Ok(serde_json::json!({
             "tee_type": "TDX",
@@ -512,6 +485,8 @@ impl TeeHost {
         }).to_string())
     }
 
+    // SEV evidence collection disabled
+    /*
     #[cfg(feature = "attestation")]
     async fn collect_sev_evidence(&self) -> Result<String> {
         use lunal_attestation::attestation::sev_snp;
@@ -524,6 +499,7 @@ impl TeeHost {
             "report": hex::encode(&report),
         }).to_string())
     }
+    */
 }
 
 impl Default for TeeHost {
