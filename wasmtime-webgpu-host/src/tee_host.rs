@@ -442,13 +442,10 @@ impl TeeHost {
             "report": hex::encode(&quote),
             "report_data": hex::encode(&_report_data),
         }).to_string();
-        Ok(evidence_json)
-        
-        // TODO: Send to remote attestation service
-        Ok(AttestationResult::with_evidence(
-            "tdx-quote".to_string(),
-            evidence_json,
-        ))
+            Ok(AttestationResult::with_evidence(
+                "tdx-quote".to_string(),
+                evidence_json,
+            ))
     }
 
     // SEV-SNP functions disabled (require TPM)
