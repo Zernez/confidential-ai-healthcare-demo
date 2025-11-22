@@ -478,7 +478,8 @@ impl TeeHost {
 
     #[cfg(feature = "attestation-tdx")]
     async fn collect_tdx_evidence(&self) -> Result<String> {
-        let quote = lunal_attestation::attestation::get_raw_attestation_report()?;
+        let quote = lunal_attestation::attestation::get_raw_attestation_report()
+            .map_err(|e| anyhow::anyhow!(format!("Failed to generate TDX evidence: {}", e)))?;
         
         Ok(serde_json::json!({
             "tee_type": "TDX",
