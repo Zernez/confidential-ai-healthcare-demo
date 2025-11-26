@@ -69,7 +69,7 @@ done
 # Check runtime exists
 # ─────────────────────────────────────────────────
 if [ ! -f "$RUNTIME" ]; then
-    echo "❌ Runtime not found: $RUNTIME"
+    echo "Runtime not found: $RUNTIME"
     echo ""
     echo "Build it first with:"
     echo "  ./build_webgpu_host.sh --release"
@@ -89,12 +89,12 @@ if [ -z "$WASM_MODULE" ]; then
     
     if [ -f "$RUST_WASM" ]; then
         WASM_MODULE="$RUST_WASM"
-        echo "📦 Auto-detected: Rust WASM module"
+        echo "Auto-detected: Rust WASM module"
     elif [ -f "$CPP_WASM" ]; then
         WASM_MODULE="$CPP_WASM"
-        echo "📦 Auto-detected: C++ WASM module"
+        echo "Auto-detected: C++ WASM module"
     else
-        echo "❌ No WASM module found!"
+        echo "No WASM module found!"
         echo ""
         echo "Build one first:"
         echo "  ./build_wasm.sh --release           # For Rust"
@@ -110,7 +110,7 @@ fi
 # Check WASM module exists
 # ─────────────────────────────────────────────────
 if [ ! -f "$WASM_MODULE" ]; then
-    echo "❌ WASM module not found: $WASM_MODULE"
+    echo "WASM module not found: $WASM_MODULE"
     exit 1
 fi
 
@@ -136,7 +136,7 @@ CMD="$RUNTIME $WASM_MODULE"
 if [ -n "$DATA_DIR" ] && [ -d "$DATA_DIR" ]; then
     CMD="$CMD --dir $DATA_DIR"
 else
-    echo "⚠️  Warning: Data directory not found. Run ./setup_data.sh first."
+    echo "Warning: Data directory not found. Run ./setup_data.sh first."
 fi
 
 # Execute

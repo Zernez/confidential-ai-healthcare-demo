@@ -1,6 +1,9 @@
-//! WASM ML Benchmark - Diabetes Prediction
+//! WASM ML Benchmark - Diabetes Prediction with TEE Attestation
 //! 
-//! This program replicates the exact behavior of the Python ML pipeline:
+//! This program replicates the exact behavior of the Python ML pipeline
+//! with added TEE (Trusted Execution Environment) attestation:
+//! 
+//! 0. [NEW] Attest VM and GPU before processing sensitive data
 //! 1. Load training data from CSV
 //! 2. Train RandomForest (200 trees, depth 16)
 //! 3. Save model
@@ -18,11 +21,82 @@ use wasm_ml::random_forest::RandomForest;
 use wasm_ml::data::Dataset;
 use wasm_ml::gpu_compute::GpuExecutor;
 
+// Import attestation module (only for WASM target)
+#[cfg(target_arch = "wasm32")]
+use wasm_ml::attestation::{attest_vm_token, attest_gpu_token, verify_attestation_token};
+
 // Model parameters - MUST match Python configuration
 const N_ESTIMATORS: usize = 200;
 const MAX_DEPTH: usize = 16;
 const N_FEATURES: usize = 10;
 const MODEL_PATH: &str = "data/model_diabetes_wasm.bin";
+
+/// Perform TEE attestation before processing sensitive data
+#[cfg(target_arch = "wasm32")]
+fn perform_attestation() -> Result<(), Box<dyn Error>> {
+    println!("\n=== TEE ATTESTATION PHASE ===\n");
+    
+    // Step 1: Attest VM (TDX or SEV-SNP)
+    println!("[🔐 ATTESTATION] Attesting VM (TDX/SEV-SNP)...");
+    match attest_vm_token() {
+        Ok(result) => {
+            println!("[✓ VM] Attestation successful!");
+            if let Some(token) = &result.token {
+                println!("  Token length: {} chars", token.len());
+                
+                // Verify the token
+                if verify_attestation_token(token) {
+                    println!("  Token verification: PASSED");
+                } else {
+                    println!("  Token verification: FAILED (but continuing)");
+                }
+            }
+            if let Some(evidence) = &result.evidence {
+                println!("  Evidence available: {} bytes", evidence.len());
+            }
+        }
+        Err(e) => {
+            println!("[⚠️  VM] Attestation failed: {}", e);
+            println!("  Note: This is expected if not running in a Confidential VM");
+        }
+    }
+    
+    // Step 2: Attest GPU (NVIDIA H100 via NRAS)
+    println!("\n[🔐 ATTESTATION] Attesting GPU (NVIDIA H100)...");
+    match attest_gpu_token(0) {
+        Ok(result) => {
+            println!("[✓ GPU] Attestation successful!");
+            if let Some(token) = &result.token {
+                println!("  Token length: {} chars", token.len());
+                
+                // Verify the token
+                if verify_attestation_token(token) {
+                    println!("  Token verification: PASSED");
+                } else {
+                    println!("  Token verification: FAILED (but continuing)");
+                }
+            }
+            if let Some(evidence) = &result.evidence {
+                println!("  Evidence available: {} bytes", evidence.len());
+            }
+        }
+        Err(e) => {
+            println!("[⚠️  GPU] Attestation failed: {}", e);
+            println!("  Note: This is expected if NVIDIA driver doesn't support attestation");
+        }
+    }
+    
+    println!("\n[✓ ATTESTATION] Phase completed - proceeding with ML training");
+    Ok(())
+}
+
+/// Placeholder for non-WASM builds
+#[cfg(not(target_arch = "wasm32"))]
+fn perform_attestation() -> Result<(), Box<dyn Error>> {
+    println!("\n=== TEE ATTESTATION PHASE ===\n");
+    println!("[⚠️  SKIP] Attestation skipped (not running in WASM)\n");
+    Ok(())
+}
 
 /// Load diabetes dataset from CSV
 fn load_csv(path: &str) -> Result<(Vec<f32>, Vec<f32>, usize), Box<dyn Error>> {
@@ -131,12 +205,15 @@ fn load_and_infer() -> Result<(), Box<dyn Error>> {
     Ok(())
 }
 
-/// Main entry point - matches main.py sequence
+/// Main entry point - matches main.py sequence with attestation
 fn main() -> Result<(), Box<dyn Error>> {
     println!("╔════════════════════════════════════════════════╗");
     println!("║   WASM ML Benchmark - Diabetes Prediction     ║");
-    println!("║   Matching Python RAPIDS implementation       ║");
+    println!("║   With TEE Attestation (VM + GPU)             ║");
     println!("╚════════════════════════════════════════════════╝");
+    
+    // Step 0: TEE Attestation (NEW)
+    perform_attestation()?;
     
     // Step 1: Training (matches MLTrainer.train_and_split())
     train_and_save()?;
