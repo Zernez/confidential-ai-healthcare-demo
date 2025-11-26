@@ -64,6 +64,13 @@ echo "[3/4] Creating data directory..."
 mkdir -p "$DATA_DIR"
 echo "Directory created: $DATA_DIR"
 
+# Also create symlink in project root for easier access
+ROOT_DATA_LINK="$PROJECT_ROOT/data"
+if [ ! -e "$ROOT_DATA_LINK" ]; then
+    ln -sf "wasm-ml/data" "$ROOT_DATA_LINK"
+    echo "✓ Symlink created: data -> wasm-ml/data"
+fi
+
 # Also create symlink for wasmwebgpu-ml if it doesn't exist
 WASMWEBGPU_DATA="$PROJECT_ROOT/wasmwebgpu-ml/data"
 if [ ! -e "$WASMWEBGPU_DATA" ]; then

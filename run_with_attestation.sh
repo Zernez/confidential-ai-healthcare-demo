@@ -8,7 +8,14 @@ set -e
 
 PROJECT_ROOT="$(cd "$(dirname "$0")" && pwd)"
 RUNTIME="$PROJECT_ROOT/wasmtime-webgpu-host/target/release/wasmtime-webgpu-host"
-DATA_DIR="$PROJECT_ROOT/data"
+# Default data directory (check multiple locations)
+DATA_DIR=""
+for dir in "$PROJECT_ROOT/data" "$PROJECT_ROOT/wasm-ml/data"; do
+    if [ -d "$dir" ]; then
+        DATA_DIR="$dir"
+        break
+    fi
+done
 
 # Default WASM module
 WASM_MODULE=""
@@ -125,9 +132,11 @@ echo ""
 # Build command
 CMD="$RUNTIME $WASM_MODULE"
 
-# Add data directory if it exists
-if [ -d "$DATA_DIR" ]; then
+# Add data directory if found
+if [ -n "$DATA_DIR" ] && [ -d "$DATA_DIR" ]; then
     CMD="$CMD --dir $DATA_DIR"
+else
+    echo "⚠️  Warning: Data directory not found. Run ./setup_data.sh first."
 fi
 
 # Execute
