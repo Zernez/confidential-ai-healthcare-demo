@@ -211,7 +211,7 @@ if [ "$BUILD_HOST" = true ]; then
 fi
 
 if [ "$BUILD_WASM_RUST" = true ]; then
-    RUST_WASM="wasm-ml/target/wasm32-wasi/release/wasm-ml-benchmark.wasm"
+    RUST_WASM="wasm-ml/target/wasm32-wasip1/release/wasm-ml-benchmark.wasm"
     if [ -f "$RUST_WASM" ]; then
         echo "  Rust WASM Module:"
         echo "    $RUST_WASM"
@@ -236,7 +236,7 @@ echo "🚀 Quick Start:"
 echo ""
 echo "  # Run Rust WASM module:"
 echo "  ./wasmtime-webgpu-host/target/release/wasmtime-webgpu-host \\"
-echo "      ./wasm-ml/target/wasm32-wasi/release/wasm-ml-benchmark.wasm \\"
+echo "      ./wasm-ml/target/wasm32-wasip1/release/wasm-ml-benchmark.wasm \\"
 echo "      --dir ./data"
 echo ""
 echo "  # Run C++ WASM module:"

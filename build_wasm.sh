@@ -13,7 +13,7 @@ echo ""
 
 PROJECT_ROOT="$(cd "$(dirname "$0")" && pwd)"
 WASM_DIR="$PROJECT_ROOT/wasm-ml"
-TARGET="wasm32-wasi"
+TARGET="wasm32-wasip1"  # WASI Preview 1 (Rust 1.78+)
 
 # ─────────────────────────────────────────────────
 # [1/5] Check Rust installation

@@ -41,7 +41,7 @@ show_help() {
 for arg in "$@"; do
     case $arg in
         --rust)
-            WASM_MODULE="$PROJECT_ROOT/wasm-ml/target/wasm32-wasi/release/wasm-ml-benchmark.wasm"
+            WASM_MODULE="$PROJECT_ROOT/wasm-ml/target/wasm32-wasip1/release/wasm-ml-benchmark.wasm"
             ;;
         --cpp)
             WASM_MODULE="$PROJECT_ROOT/wasmwebgpu-ml/build/wasmwebgpu-ml-benchmark.wasm"
@@ -77,7 +77,7 @@ fi
 # ─────────────────────────────────────────────────
 if [ -z "$WASM_MODULE" ]; then
     # Try Rust first
-    RUST_WASM="$PROJECT_ROOT/wasm-ml/target/wasm32-wasi/release/wasm-ml-benchmark.wasm"
+    RUST_WASM="$PROJECT_ROOT/wasm-ml/target/wasm32-wasip1/release/wasm-ml-benchmark.wasm"
     CPP_WASM="$PROJECT_ROOT/wasmwebgpu-ml/build/wasmwebgpu-ml-benchmark.wasm"
     
     if [ -f "$RUST_WASM" ]; then
