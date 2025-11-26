@@ -16,7 +16,7 @@ mod gpu_backend;
 mod tee_host;
 
 use webgpu_host::WebGpuHost;
-use tee_host::TeeHost;
+use tee_host::{TeeHost, AsTeeHost};
 
 /// Command line arguments
 #[derive(Debug)]
@@ -168,4 +168,11 @@ struct HostState {
     wasi: WasiCtx,
     webgpu: WebGpuHost,
     tee: TeeHost,
+}
+
+/// Implement AsTeeHost trait for HostState
+impl AsTeeHost for HostState {
+    fn as_tee_host(&self) -> &TeeHost {
+        &self.tee
+    }
 }

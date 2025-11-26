@@ -14,6 +14,7 @@ use log::{debug, info, warn, error};
 use serde::{Deserialize, Serialize};
 use std::sync::{Arc, Mutex};
 use wasmtime::{Caller, Linker};
+use tokio::runtime::Handle;
 
 // Conditional import based on features
 #[cfg(feature = "lunal-attestation")]
@@ -81,12 +82,17 @@ impl AttestationResult {
     }
 }
 
-/// TEE Host state
+/// TEE Host state (wrapped in Arc for sharing with closures)
+#[derive(Clone)]
 pub struct TeeHost {
+    inner: Arc<TeeHostInner>,
+}
+
+struct TeeHostInner {
     /// Cached VM attestation token
-    vm_token_cache: Arc<Mutex<Option<String>>>,
+    vm_token_cache: Mutex<Option<String>>,
     /// Cached GPU attestation token
-    gpu_token_cache: Arc<Mutex<Option<String>>>,
+    gpu_token_cache: Mutex<Option<String>>,
     /// NRAS endpoint (optional override)
     nras_endpoint: Option<String>,
 }
@@ -95,43 +101,50 @@ impl TeeHost {
     pub fn new() -> Self {
         info!("Initializing TEE Host (wasmtime:attestation)");
         Self {
-            vm_token_cache: Arc::new(Mutex::new(None)),
-            gpu_token_cache: Arc::new(Mutex::new(None)),
-            nras_endpoint: None,
+            inner: Arc::new(TeeHostInner {
+                vm_token_cache: Mutex::new(None),
+                gpu_token_cache: Mutex::new(None),
+                nras_endpoint: None,
+            }),
         }
     }
 
     pub fn with_nras_endpoint(mut self, endpoint: String) -> Self {
-        self.nras_endpoint = Some(endpoint);
+        // Note: This requires creating a new Arc, which is fine for initialization
+        self.inner = Arc::new(TeeHostInner {
+            vm_token_cache: Mutex::new(None),
+            gpu_token_cache: Mutex::new(None),
+            nras_endpoint: Some(endpoint),
+        });
         self
     }
 
-    /// Attest VM (TDX or SEV-SNP)
-    pub async fn attest_vm(&self) -> Result<AttestationResult> {
+    /// Attest VM (TDX) - synchronous wrapper
+    pub fn attest_vm_sync(&self) -> AttestationResult {
         info!("🔐 Starting VM attestation...");
 
         // Check cache first
         {
-            let cache = self.vm_token_cache.lock().unwrap();
+            let cache = self.inner.vm_token_cache.lock().unwrap();
             if let Some(cached_token) = cache.as_ref() {
                 info!("✓ Using cached VM attestation token");
-                return Ok(AttestationResult::success(cached_token.clone()));
+                return AttestationResult::success(cached_token.clone());
             }
         }
 
-        // Try TDX first
+        // Try TDX
         #[cfg(feature = "attestation-tdx")]
         {
             debug!("Attempting TDX attestation...");
-            match self.attest_tdx().await {
+            match self.attest_tdx_sync() {
                 Ok(result) => {
                     info!("✓ TDX attestation successful");
                     // Cache the token
                     if let Some(token) = &result.token {
-                        let mut cache = self.vm_token_cache.lock().unwrap();
+                        let mut cache = self.inner.vm_token_cache.lock().unwrap();
                         *cache = Some(token.clone());
                     }
-                    return Ok(result);
+                    return result;
                 }
                 Err(e) => {
                     debug!("TDX attestation failed: {}", e);
@@ -139,57 +152,58 @@ impl TeeHost {
             }
         }
 
-        // Try SEV-SNP
-        // Disabled: requires TPM libraries
-        // #[cfg(feature = "attestation")]
-        // {
-        //     debug!("Attempting SEV-SNP attestation...");
-        //     ...
-        // }
-
         // No TEE available
-        error!("❌ No TEE attestation available (TDX not found)");
-        Ok(AttestationResult::failure(
+        warn!("⚠️  No TEE attestation available (TDX not found or not in CVM)");
+        AttestationResult::failure(
             "No TEE attestation available. Not running in Intel TDX confidential VM?".to_string()
-        ))
+        )
     }
 
-    /// Attest GPU via NVIDIA NRAS
-    pub async fn attest_gpu(&self, gpu_index: u32) -> Result<AttestationResult> {
+    /// Attest GPU via NVIDIA NRAS - synchronous wrapper using block_on
+    pub fn attest_gpu_sync(&self, gpu_index: u32) -> AttestationResult {
         info!("🔐 Starting GPU attestation for device {}...", gpu_index);
 
         // Check cache first
         {
-            let cache = self.gpu_token_cache.lock().unwrap();
+            let cache = self.inner.gpu_token_cache.lock().unwrap();
             if let Some(cached_token) = cache.as_ref() {
                 info!("✓ Using cached GPU attestation token");
-                return Ok(AttestationResult::success(cached_token.clone()));
+                return AttestationResult::success(cached_token.clone());
             }
         }
 
         #[cfg(feature = "attestation-nvidia")]
         {
-            debug!("Collecting GPU evidence...");
+            debug!("Collecting GPU evidence and requesting token from NRAS...");
             
-            // Call attestation-rs library
-            match lunal_attestation::nvidia::attest::attest_remote_token(
-                gpu_index,
-                None, // Use default nonce
-                self.nras_endpoint.clone(), // Clone the Option<String>
-            ).await {
+            // Get the tokio runtime handle and run async code synchronously
+            let nras_endpoint = self.inner.nras_endpoint.clone();
+            
+            // Use tokio's block_in_place to run async code from sync context
+            let result = tokio::task::block_in_place(|| {
+                Handle::current().block_on(async {
+                    lunal_attestation::nvidia::attest::attest_remote_token(
+                        gpu_index,
+                        None, // Use default nonce
+                        nras_endpoint,
+                    ).await
+                })
+            });
+            
+            match result {
                 Ok(token) => {
                     info!("✓ GPU attestation successful");
                     info!("  Token length: {} chars", token.len());
                     
                     // Cache the token
-                    let mut cache = self.gpu_token_cache.lock().unwrap();
+                    let mut cache = self.inner.gpu_token_cache.lock().unwrap();
                     *cache = Some(token.clone());
                     
-                    Ok(AttestationResult::success(token))
+                    return AttestationResult::success(token);
                 }
                 Err(e) => {
                     error!("❌ GPU attestation failed: {}", e);
-                    Ok(AttestationResult::failure(format!("GPU attestation failed: {}", e)))
+                    return AttestationResult::failure(format!("GPU attestation failed: {}", e));
                 }
             }
         }
@@ -197,108 +211,46 @@ impl TeeHost {
         #[cfg(not(feature = "attestation-nvidia"))]
         {
             error!("❌ GPU attestation not compiled in (missing attestation-nvidia feature)");
-            Ok(AttestationResult::failure(
+            AttestationResult::failure(
                 "GPU attestation not available. Recompile with --features attestation-nvidia".to_string()
-            ))
-        }
-    }
-
-    /// Get VM evidence without remote attestation
-    pub async fn get_vm_evidence(&self) -> Result<AttestationResult> {
-        info!("📄 Collecting VM evidence...");
-
-        #[cfg(feature = "attestation-tdx")]
-        {
-            debug!("Collecting TDX evidence...");
-            match self.collect_tdx_evidence().await {
-                Ok(evidence_json) => {
-                    info!("✓ TDX evidence collected");
-                    return Ok(AttestationResult::with_evidence(
-                        "evidence-only".to_string(),
-                        evidence_json,
-                    ));
-                }
-                Err(e) => {
-                    debug!("TDX evidence collection failed: {}", e);
-                }
-            }
-        }
-
-        // Disabled: SEV-SNP requires TPM
-        // #[cfg(feature = "attestation")]
-        // {
-        //     debug!("Collecting SEV-SNP evidence...");
-        //     ...
-        // }
-
-        error!("❌ No TEE evidence available");
-        Ok(AttestationResult::failure("No TEE available".to_string()))
-    }
-
-    /// Get GPU evidence without remote attestation
-    pub async fn get_gpu_evidence(&self, gpu_index: u32) -> Result<AttestationResult> {
-        info!("📄 Collecting GPU evidence for device {}...", gpu_index);
-
-        #[cfg(feature = "attestation-nvidia")]
-        {
-            match lunal_attestation::nvidia::attest::collect_evidence(gpu_index, None) {
-                Ok(evidence) => {
-                    info!("✓ GPU evidence collected");
-                    let evidence_json = evidence.to_json_pretty()
-                        .unwrap_or_else(|e| format!(r#"{{"error":"{}"}}"#, e));
-                    
-                    Ok(AttestationResult::with_evidence(
-                        "evidence-only".to_string(),
-                        evidence_json,
-                    ))
-                }
-                Err(e) => {
-                    error!("❌ GPU evidence collection failed: {}", e);
-                    Ok(AttestationResult::failure(format!("GPU evidence collection failed: {}", e)))
-                }
-            }
-        }
-
-        #[cfg(not(feature = "attestation-nvidia"))]
-        {
-            Ok(AttestationResult::failure("GPU evidence not available".to_string()))
+            )
         }
     }
 
     /// Verify a JWT token (basic validation)
-    pub fn verify_token(&self, token: &str) -> Result<bool> {
+    pub fn verify_token(&self, token: &str) -> bool {
         debug!("Verifying token...");
         
         if token.is_empty() {
-            return Ok(false);
+            return false;
         }
 
         // Basic JWT structure validation
         let parts: Vec<&str> = token.split('.').collect();
         if parts.len() != 3 {
             warn!("Invalid JWT format (expected 3 parts, got {})", parts.len());
-            return Ok(false);
+            return false;
         }
 
         // TODO: Full JWT signature verification with public key
-        // For now, just check structure
         debug!("✓ Token structure valid");
-        Ok(true)
+        true
     }
 
     /// Clear all cached tokens
     pub fn clear_cache(&self) {
         info!("Clearing attestation token cache");
-        let mut vm_cache = self.vm_token_cache.lock().unwrap();
+        let mut vm_cache = self.inner.vm_token_cache.lock().unwrap();
         *vm_cache = None;
-        let mut gpu_cache = self.gpu_token_cache.lock().unwrap();
+        let mut gpu_cache = self.inner.gpu_token_cache.lock().unwrap();
         *gpu_cache = None;
     }
 
     /// Register host functions with Wasmtime linker
+    /// T must provide access to TeeHost via the get_tee_host trait
     pub fn register_functions<T>(&self, linker: &mut Linker<T>) -> Result<()>
     where
-        T: Send + 'static,
+        T: AsTeeHost + Send + 'static,
     {
         info!("Registering wasmtime:attestation functions...");
 
@@ -309,15 +261,14 @@ impl TeeHost {
             |mut caller: Caller<'_, T>| -> i32 {
                 info!("[WASM] attest_vm() called");
                 
-                // We need to make this work with the sync context
-                // For now, return a placeholder
-                let result = AttestationResult::failure(
-                    "VM attestation requires async runtime - use attest_vm_async".to_string()
-                );
-                let json = result.to_json();
+                // Get TeeHost from caller's state and perform attestation
+                let result = {
+                    let tee_host = caller.data().as_tee_host();
+                    tee_host.attest_vm_sync()
+                };
                 
-                // Allocate memory in WASM and write JSON
-                Self::write_string_to_wasm(&mut caller, &json)
+                let json = result.to_json();
+                write_string_to_wasm(&mut caller, &json)
             },
         )?;
 
@@ -328,12 +279,14 @@ impl TeeHost {
             |mut caller: Caller<'_, T>, gpu_index: u32| -> i32 {
                 info!("[WASM] attest_gpu({}) called", gpu_index);
                 
-                let result = AttestationResult::failure(
-                    "GPU attestation requires async runtime - use attest_gpu_async".to_string()
-                );
-                let json = result.to_json();
+                // Get TeeHost from caller's state and perform attestation
+                let result = {
+                    let tee_host = caller.data().as_tee_host();
+                    tee_host.attest_gpu_sync(gpu_index)
+                };
                 
-                Self::write_string_to_wasm(&mut caller, &json)
+                let json = result.to_json();
+                write_string_to_wasm(&mut caller, &json)
             },
         )?;
 
@@ -345,11 +298,10 @@ impl TeeHost {
                 debug!("[WASM] verify_token() called");
                 
                 // Read token from WASM memory
-                match Self::read_string_from_wasm(&mut caller, token_ptr, token_len) {
+                match read_string_from_wasm(&mut caller, token_ptr, token_len) {
                     Ok(token) => {
-                        // Basic verification
-                        let parts: Vec<&str> = token.split('.').collect();
-                        if parts.len() == 3 { 1 } else { 0 }
+                        let tee_host = caller.data().as_tee_host();
+                        if tee_host.verify_token(&token) { 1 } else { 0 }
                     }
                     Err(_) => 0,
                 }
@@ -360,10 +312,10 @@ impl TeeHost {
         linker.func_wrap(
             "wasmtime_attestation",
             "clear_cache",
-            |_caller: Caller<'_, T>| {
+            |caller: Caller<'_, T>| {
                 info!("[WASM] clear_cache() called");
-                // We can't access self here, so this is a no-op for now
-                // TODO: Use a static or pass TeeHost through HostState
+                let tee_host = caller.data().as_tee_host();
+                tee_host.clear_cache();
             },
         )?;
 
@@ -371,138 +323,100 @@ impl TeeHost {
         Ok(())
     }
 
-    /// Helper: Write string to WASM memory
-    fn write_string_to_wasm<T>(caller: &mut Caller<'_, T>, s: &str) -> i32 {
-        // Get WASM memory
-        let memory = match caller.get_export("memory") {
-            Some(wasmtime::Extern::Memory(mem)) => mem,
-            _ => {
-                error!("Failed to get WASM memory export");
-                return 0;
-            }
-        };
-
-        // Allocate memory in WASM (call __wasm_malloc if available)
-        // For now, we'll use a simple approach: write to a fixed location
-        // TODO: Proper memory allocation via WASM allocator
-        
-        let bytes = s.as_bytes();
-        let len = bytes.len();
-        
-        // Write length at offset 0
-        let data = memory.data_mut(caller);
-        if data.len() < len + 8 {
-            error!("WASM memory too small");
-            return 0;
-        }
-        
-        // Write: [len: 4 bytes][data: len bytes]
-        let offset = 1024; // Fixed offset for now
-        data[offset..offset+4].copy_from_slice(&(len as u32).to_le_bytes());
-        data[offset+4..offset+4+len].copy_from_slice(bytes);
-        
-        offset as i32
-    }
-
-    /// Helper: Read string from WASM memory
-    fn read_string_from_wasm<T>(caller: &mut Caller<'_, T>, ptr: i32, len: i32) -> Result<String> {
-        if ptr < 0 || len < 0 {
-            anyhow::bail!("Invalid pointer or length");
-        }
-
-        let memory = match caller.get_export("memory") {
-            Some(wasmtime::Extern::Memory(mem)) => mem,
-            _ => anyhow::bail!("Failed to get WASM memory export"),
-        };
-
-        let data = memory.data(caller);
-        let start = ptr as usize;
-        let end = start + (len as usize);
-
-        if end > data.len() {
-            anyhow::bail!("Read out of bounds");
-        }
-
-        String::from_utf8(data[start..end].to_vec())
-            .context("Invalid UTF-8 in WASM memory")
-    }
-
     // ============================================
     // Platform-specific attestation implementations
     // ============================================
 
     #[cfg(feature = "attestation-tdx")]
-    async fn attest_tdx(&self) -> Result<AttestationResult> {
+    fn attest_tdx_sync(&self) -> Result<AttestationResult> {
         // Use the attestation module functions
-        let _report_data = vec![0u8; 64];
+        let report_data = vec![0u8; 64];
         let quote = lunal_attestation::attestation::get_raw_attestation_report()
-            .map_err(|e| anyhow::anyhow!(format!("Failed to generate TDX evidence: {}", e)))?;
+            .map_err(|e| anyhow::anyhow!("Failed to generate TDX quote: {}", e))?;
+        
         let evidence_json = serde_json::json!({
             "tee_type": "TDX",
-            "report": hex::encode(&quote),
-            "report_data": hex::encode(&_report_data),
-        }).to_string();
-            Ok(AttestationResult::with_evidence(
-                "tdx-quote".to_string(),
-                evidence_json,
-            ))
-    }
-
-    // SEV-SNP functions disabled (require TPM)
-    /*
-    #[cfg(feature = "attestation")]
-    async fn attest_sev_snp(&self) -> Result<AttestationResult> {
-        use lunal_attestation::attestation::sev_snp;
-        
-        // Generate SEV-SNP attestation report
-        let report_data = vec![0u8; 64];
-        let report = sev_snp::get_report(&report_data)
-            .context("Failed to generate SEV-SNP report")?;
-        
-        let evidence_json = serde_json::json!({
-            "tee_type": "SEV-SNP",
-            "report": hex::encode(&report),
-            "report_data": hex::encode(&report_data),
+            "quote": hex::encode(&quote),
+            "quote_size": quote.len(),
         }).to_string();
         
-        // TODO: Send to Azure attestation service
         Ok(AttestationResult::with_evidence(
-            "sev-snp-report".to_string(),
+            "tdx-quote".to_string(),
             evidence_json,
         ))
     }
-    */
 
     #[cfg(feature = "attestation-tdx")]
-    async fn collect_tdx_evidence(&self) -> Result<String> {
+    fn collect_tdx_evidence(&self) -> Result<String> {
         let quote = lunal_attestation::attestation::get_raw_attestation_report()
-            .map_err(|e| anyhow::anyhow!(format!("Failed to generate TDX evidence: {}", e)))?;
+            .map_err(|e| anyhow::anyhow!("Failed to generate TDX evidence: {}", e))?;
         
         Ok(serde_json::json!({
             "tee_type": "TDX",
             "quote": hex::encode(&quote),
         }).to_string())
     }
-
-    // SEV evidence collection disabled
-    /*
-    #[cfg(feature = "attestation")]
-    async fn collect_sev_evidence(&self) -> Result<String> {
-        use lunal_attestation::attestation::sev_snp;
-        
-        let report_data = vec![0u8; 64];
-        let report = sev_snp::get_report(&report_data)?;
-        
-        Ok(serde_json::json!({
-            "tee_type": "SEV-SNP",
-            "report": hex::encode(&report),
-        }).to_string())
-    }
-    */
 }
 
 impl Default for TeeHost {
     fn default() -> Self {
         Self::new()
     }
+}
+
+/// Trait for types that can provide access to TeeHost
+pub trait AsTeeHost {
+    fn as_tee_host(&self) -> &TeeHost;
+}
+
+/// Helper: Write string to WASM memory
+fn write_string_to_wasm<T>(caller: &mut Caller<'_, T>, s: &str) -> i32 {
+    // Get WASM memory
+    let memory = match caller.get_export("memory") {
+        Some(wasmtime::Extern::Memory(mem)) => mem,
+        _ => {
+            error!("Failed to get WASM memory export");
+            return 0;
+        }
+    };
+
+    let bytes = s.as_bytes();
+    let len = bytes.len();
+    
+    // Write: [len: 4 bytes][data: len bytes] at a fixed offset
+    let offset = 1024; // Fixed offset for attestation responses
+    
+    let data = memory.data_mut(caller);
+    if data.len() < offset + len + 8 {
+        error!("WASM memory too small for attestation response");
+        return 0;
+    }
+    
+    data[offset..offset+4].copy_from_slice(&(len as u32).to_le_bytes());
+    data[offset+4..offset+4+len].copy_from_slice(bytes);
+    
+    offset as i32
+}
+
+/// Helper: Read string from WASM memory
+fn read_string_from_wasm<T>(caller: &mut Caller<'_, T>, ptr: i32, len: i32) -> Result<String> {
+    if ptr < 0 || len < 0 {
+        anyhow::bail!("Invalid pointer or length");
+    }
+
+    let memory = match caller.get_export("memory") {
+        Some(wasmtime::Extern::Memory(mem)) => mem,
+        _ => anyhow::bail!("Failed to get WASM memory export"),
+    };
+
+    let data = memory.data(caller);
+    let start = ptr as usize;
+    let end = start + (len as usize);
+
+    if end > data.len() {
+        anyhow::bail!("Read out of bounds");
+    }
+
+    String::from_utf8(data[start..end].to_vec())
+        .context("Invalid UTF-8 in WASM memory")
 }
