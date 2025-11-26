@@ -1,84 +1,177 @@
 #!/bin/bash
 set -e
 
-# ==================================================
-echo -e "WASM ML Build Script"
-echo -e "=================================================="
+# ╔════════════════════════════════════════════════╗
+# ║  WASM-ML Build Script (Rust)                  ║
+# ║  Compiles Rust ML module to WebAssembly       ║
+# ╚════════════════════════════════════════════════╝
 
-projectRoot="$(cd "$(dirname "$0")" && pwd)"
-wasmDir="$projectRoot/wasm-ml"
+echo "╔════════════════════════════════════════════════╗"
+echo "║  Building wasm-ml (Rust → WASM)               ║"
+echo "╚════════════════════════════════════════════════╝"
+echo ""
 
-# [1/6] Check Rust installation
-echo -e "[1/6] Checking Rust installation..."
+PROJECT_ROOT="$(cd "$(dirname "$0")" && pwd)"
+WASM_DIR="$PROJECT_ROOT/wasm-ml"
+TARGET="wasm32-wasi"
+
+# ─────────────────────────────────────────────────
+# [1/5] Check Rust installation
+# ─────────────────────────────────────────────────
+echo "[1/5] Checking Rust installation..."
 if ! command -v rustc &> /dev/null; then
-    echo -e "Rust not found. Installing..."
-    curl --proto '=https' --tlsv1.2 https://sh.rustup.rs -sSf | sh
+    echo "❌ Rust not found. Installing..."
+    curl --proto '=https' --tlsv1.2 https://sh.rustup.rs -sSf | sh -s -- -y
+    source "$HOME/.cargo/env"
 else
-    rustVersion=$(rustc --version)
-    echo -e "Rust installed: $rustVersion"
+    RUST_VERSION=$(rustc --version)
+    echo "✓ Rust installed: $RUST_VERSION"
 fi
 
-# [2/6] Check WASM target
-echo -e "[2/6] Checking wasm32-wasi target..."
-if ! rustup target list --installed | grep -q "wasm32-wasip1"; then
-    echo -e "Installing wasm32-wasip1 target..."
-    rustup target add wasm32-wasip1
-    echo -e "wasm32-wasip1 installed"
+# ─────────────────────────────────────────────────
+# [2/5] Check/Install WASM target
+# ─────────────────────────────────────────────────
+echo ""
+echo "[2/5] Checking $TARGET target..."
+if ! rustup target list --installed | grep -q "$TARGET"; then
+    echo "Installing $TARGET target..."
+    rustup target add $TARGET
+    echo "✓ $TARGET installed"
 else
-    echo -e "wasm32-wasip1 already installed"
+    echo "✓ $TARGET already installed"
 fi
 
-# [3/6] Clean if requested
-if [[ "$1" == "--clean" ]]; then
-    echo -e "[3/6] Cleaning build artifacts..."
-    pushd "$wasmDir" > /dev/null
+# ─────────────────────────────────────────────────
+# [3/5] Parse arguments
+# ─────────────────────────────────────────────────
+RELEASE_FLAG=""
+BUILD_CONFIG="debug"
+CLEAN=false
+TEST_ONLY=false
+
+for arg in "$@"; do
+    case $arg in
+        --release)
+            RELEASE_FLAG="--release"
+            BUILD_CONFIG="release"
+            ;;
+        --clean)
+            CLEAN=true
+            ;;
+        --test)
+            TEST_ONLY=true
+            ;;
+        --help)
+            echo ""
+            echo "Usage: $0 [OPTIONS]"
+            echo ""
+            echo "Options:"
+            echo "  --release    Build in release mode (optimized)"
+            echo "  --clean      Clean build artifacts before building"
+            echo "  --test       Run tests only (no build)"
+            echo "  --help       Show this help message"
+            echo ""
+            exit 0
+            ;;
+    esac
+done
+
+# ─────────────────────────────────────────────────
+# [3/5] Clean if requested
+# ─────────────────────────────────────────────────
+if [ "$CLEAN" = true ]; then
+    echo ""
+    echo "[3/5] Cleaning build artifacts..."
+    pushd "$WASM_DIR" > /dev/null
     cargo clean
     popd > /dev/null
-    echo -e "Clean complete"
+    echo "✓ Clean complete"
+else
+    echo ""
+    echo "[3/5] Skipping clean (use --clean to clean)"
 fi
 
-# [4/6] Run tests if requested
-if [[ "$1" == "--test" ]]; then
-    echo -e "[4/6] Running tests..."
-    pushd "$wasmDir" > /dev/null
+# ─────────────────────────────────────────────────
+# [4/5] Run tests if requested
+# ─────────────────────────────────────────────────
+if [ "$TEST_ONLY" = true ]; then
+    echo ""
+    echo "[4/5] Running tests..."
+    pushd "$WASM_DIR" > /dev/null
     cargo test
-    if [ $? -ne 0 ]; then
-        echo -e "Tests failed"
-        popd > /dev/null
+    TEST_RESULT=$?
+    popd > /dev/null
+    if [ $TEST_RESULT -ne 0 ]; then
+        echo "❌ Tests failed"
         exit 1
     fi
-    popd > /dev/null
-    echo -e "Tests complete"
+    echo "✓ Tests passed"
     exit 0
 fi
 
-releaseFlag=""
-buildConfig="debug"
-if [[ "$1" == "--release" ]]; then
-    releaseFlag="--release"
-    buildConfig="release"
-fi
+# ─────────────────────────────────────────────────
+# [4/5] Build WASM module
+# ─────────────────────────────────────────────────
+echo ""
+echo "[4/5] Building WASM module..."
+echo "  Mode: $BUILD_CONFIG"
+echo "  Target: $TARGET"
+echo ""
 
-echo -e "[5/6] Building WASM module..."
-pushd "$wasmDir" > /dev/null
-echo -e "Build mode: $buildConfig"
-cargo build --target wasm32-wasip1 $releaseFlag
-if [ $? -ne 0 ]; then
-    echo -e "Build failed"
-    popd > /dev/null
+pushd "$WASM_DIR" > /dev/null
+cargo build --target $TARGET $RELEASE_FLAG
+BUILD_RESULT=$?
+popd > /dev/null
+
+if [ $BUILD_RESULT -ne 0 ]; then
+    echo ""
+    echo "❌ Build failed"
     exit 1
 fi
-popd > /dev/null
-echo -e "Build complete"
 
-# [6/6] Show output location
-wasmOutput="$wasmDir/target/wasm32-wasip1/$buildConfig/wasm_ml.wasm"
-if [ -f "$wasmOutput" ]; then
-    wasmSize=$(du -k "$wasmOutput" | cut -f1)
-    echo -e "[6/6] Build Summary"
-    echo -e "  Location: $wasmOutput"
-    echo -e "  Size: ${wasmSize} KB"
-else
-    echo -e "[6/6] Build Summary"
-    echo -e "  Location: $wasmOutput (not found)"
+# ─────────────────────────────────────────────────
+# [5/5] Show output summary
+# ─────────────────────────────────────────────────
+echo ""
+echo "[5/5] Build Summary"
+echo "─────────────────────────────────────────────────"
+
+# Check for binary output
+WASM_BINARY="$WASM_DIR/target/$TARGET/$BUILD_CONFIG/wasm-ml-benchmark.wasm"
+WASM_LIB="$WASM_DIR/target/$TARGET/$BUILD_CONFIG/wasm_ml.wasm"
+
+if [ -f "$WASM_BINARY" ]; then
+    WASM_SIZE=$(ls -lh "$WASM_BINARY" | awk '{print $5}')
+    echo "✓ Binary: $WASM_BINARY"
+    echo "  Size: $WASM_SIZE"
 fi
+
+if [ -f "$WASM_LIB" ]; then
+    LIB_SIZE=$(ls -lh "$WASM_LIB" | awk '{print $5}')
+    echo "✓ Library: $WASM_LIB"
+    echo "  Size: $LIB_SIZE"
+fi
+
+# Check for examples
+EXAMPLE_DIR="$WASM_DIR/target/$TARGET/$BUILD_CONFIG/examples"
+if [ -d "$EXAMPLE_DIR" ]; then
+    EXAMPLES=$(ls "$EXAMPLE_DIR"/*.wasm 2>/dev/null || true)
+    if [ -n "$EXAMPLES" ]; then
+        echo ""
+        echo "Examples:"
+        for ex in $EXAMPLES; do
+            EX_SIZE=$(ls -lh "$ex" | awk '{print $5}')
+            echo "  • $(basename $ex) ($EX_SIZE)"
+        done
+    fi
+fi
+
+echo ""
+echo "╔════════════════════════════════════════════════╗"
+echo "║  ✓ wasm-ml build complete!                    ║"
+echo "╚════════════════════════════════════════════════╝"
+echo ""
+echo "To run with attestation-enabled runtime:"
+echo "  ./wasmtime-webgpu-host/target/release/wasmtime-webgpu-host \\"
+echo "      $WASM_BINARY \\"
+echo "      --dir ./data"
