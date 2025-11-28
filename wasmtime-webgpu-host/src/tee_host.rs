@@ -527,14 +527,22 @@ impl TeeHost {
     /// NRAS remote attestation
     #[cfg(feature = "attestation-nvidia")]
     fn attest_gpu_nras(&self, gpu_index: u32) -> Result<AttestationResult> {
-        let nras_endpoint = self.inner.nras_endpoint.clone();
+        // Get API key from environment variable
+        // The lunal-attestation crate expects NVIDIA_API_KEY env var
+        // but we also check for it explicitly here
+        let api_key = std::env::var("NVIDIA_API_KEY").ok();
+        
+        if api_key.is_none() {
+            warn!("NVIDIA_API_KEY not set - NRAS remote attestation may fail");
+            warn!("Get your API key from: https://org.ngc.nvidia.com/setup/api-key");
+        }
         
         let result = tokio::task::block_in_place(|| {
             Handle::current().block_on(async {
                 lunal_attestation::nvidia::attest::attest_remote_token(
                     gpu_index,
-                    None,
-                    nras_endpoint,
+                    None,      // nonce - let the library generate one
+                    api_key,   // API key (None means it will try NVIDIA_API_KEY env var)
                 ).await
             })
         });
@@ -553,6 +561,8 @@ impl TeeHost {
                 let error_str = format!("{}", e);
                 if error_str.contains("403") || error_str.contains("Forbidden") {
                     Err(anyhow::anyhow!("NRAS returned 403 Forbidden - API key may not have attestation permissions"))
+                } else if error_str.contains("NVIDIA_API_KEY") {
+                    Err(anyhow::anyhow!("NVIDIA_API_KEY not set. Get your key from https://org.ngc.nvidia.com/setup/api-key"))
                 } else {
                     Err(anyhow::anyhow!("NRAS attestation failed: {}", e))
                 }
