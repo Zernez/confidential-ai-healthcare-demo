@@ -442,8 +442,8 @@ impl TeeHost {
                 "signature": base64::encode(&quote.signature),
                 "message": base64::encode(&quote.message),
             },
-            "vcek_cert": base64::encode(&certs.vcek),
-            "cert_chain": base64::encode(&certs.amd_chain),
+            "vcek_cert": base64::encode(certs.vcek.as_bytes()),
+            "cert_chain": base64::encode(certs.amd_chain.as_bytes()),
         });
         let token = base64::encode(&serde_json::to_vec(&attestation_bundle).unwrap_or_default());
 
