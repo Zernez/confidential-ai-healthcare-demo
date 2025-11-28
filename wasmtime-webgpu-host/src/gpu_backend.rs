@@ -91,7 +91,7 @@ impl GpuBackend {
         });
         
         // Enumerate all adapters
-        let adapters: Vec<_> = instance.enumerate_adapters(Backends::VULKAN).collect();
+        let adapters = instance.enumerate_adapters(Backends::VULKAN);
         
         info!("Found {} Vulkan adapter(s):", adapters.len());
         for (i, adapter) in adapters.iter().enumerate() {
