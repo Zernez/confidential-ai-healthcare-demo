@@ -397,8 +397,8 @@ impl TeeHost {
             })
         }).map_err(|e| anyhow::anyhow!("Failed to get VCEK certs from IMDS: {}", e))?;
         info!("  ✓ VCEK certificate chain obtained");
-        info!("    VCEK cert: {} bytes", certs.vcek_cert.len());
-        info!("    Cert chain: {} bytes", certs.certificate_chain.len());
+        info!("    VCEK cert: {} bytes", certs.vcek.len());
+        info!("    Cert chain: {} bytes", certs.amd_chain.len());
 
         // Build evidence JSON
         let evidence = serde_json::json!({
@@ -426,8 +426,8 @@ impl TeeHost {
                 "exponent_size": ak_pub.exponent().len(),
             },
             "vcek_certs": {
-                "vcek_cert_size": certs.vcek_cert.len(),
-                "chain_size": certs.certificate_chain.len(),
+                "vcek_cert_size": certs.vcek.len(),
+                "chain_size": certs.amd_chain.len(),
             },
         });
 
@@ -442,10 +442,10 @@ impl TeeHost {
                 "signature": base64::encode(&quote.signature),
                 "message": base64::encode(&quote.message),
             },
-            "vcek_cert": base64::encode(&certs.vcek_cert),
-            "cert_chain": base64::encode(&certs.certificate_chain),
+            "vcek_cert": base64::encode(&certs.vcek),
+            "cert_chain": base64::encode(&certs.amd_chain),
         });
-        let token = base64::encode(serde_json::to_vec(&attestation_bundle).unwrap_or_default());
+        let token = base64::encode(&serde_json::to_vec(&attestation_bundle).unwrap_or_default());
 
         info!("✓ AMD SEV-SNP attestation completed successfully");
         info!("  Evidence size: {} bytes", evidence_str.len());
