@@ -13,6 +13,15 @@ pub struct AttestationResult {
     pub evidence: Option<String>,
     pub error: Option<String>,
     pub timestamp: i64,
+    #[serde(default)]
+    pub tee_type: Option<String>,
+}
+
+/// TEE detection result
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct TeeDetectionResult {
+    pub tee_type: String,
+    pub supports_attestation: bool,
 }
 
 // External declarations for host functions
@@ -32,13 +41,26 @@ extern "C" {
     
     /// Clear cached attestation tokens
     fn clear_cache();
+
+    /// Detect TEE type without performing attestation
+    /// Returns pointer to JSON with tee_type and supports_attestation
+    fn detect_tee() -> i32;
+}
+
+/// Detect the TEE type of the current environment
+pub fn detect_tee_type() -> Result<TeeDetectionResult, String> {
+    unsafe {
+        let ptr = detect_tee();
+        let result = read_json_from_host::<TeeDetectionResult>(ptr)?;
+        Ok(result)
+    }
 }
 
 /// Attest the VM and return result
 pub fn attest_vm_token() -> Result<AttestationResult, String> {
     unsafe {
         let ptr = attest_vm();
-        let result = read_json_from_host(ptr)?;
+        let result = read_json_from_host::<AttestationResult>(ptr)?;
         
         if result.success {
             Ok(result)
@@ -52,7 +74,7 @@ pub fn attest_vm_token() -> Result<AttestationResult, String> {
 pub fn attest_gpu_token(gpu_index: u32) -> Result<AttestationResult, String> {
     unsafe {
         let ptr = attest_gpu(gpu_index);
-        let result = read_json_from_host(ptr)?;
+        let result = read_json_from_host::<AttestationResult>(ptr)?;
         
         if result.success {
             Ok(result)
@@ -62,7 +84,7 @@ pub fn attest_gpu_token(gpu_index: u32) -> Result<AttestationResult, String> {
     }
 }
 
-/// Verify a JWT token
+/// Verify a JWT token or attestation bundle
 pub fn verify_attestation_token(token: &str) -> bool {
     unsafe {
         let result = verify_token(token.as_ptr(), token.len() as i32);
@@ -78,7 +100,7 @@ pub fn clear_attestation_cache() {
 }
 
 /// Helper: Read JSON from host memory
-unsafe fn read_json_from_host(ptr: i32) -> Result<AttestationResult, String> {
+unsafe fn read_json_from_host<T: for<'de> Deserialize<'de>>(ptr: i32) -> Result<T, String> {
     if ptr == 0 {
         return Err("Host returned null pointer".to_string());
     }

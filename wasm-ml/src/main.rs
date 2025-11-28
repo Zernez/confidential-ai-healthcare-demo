@@ -23,7 +23,7 @@ use wasm_ml::gpu_compute::GpuExecutor;
 
 // Import attestation module (only for WASM target)
 #[cfg(target_arch = "wasm32")]
-use wasm_ml::attestation::{attest_vm_token, attest_gpu_token, verify_attestation_token};
+use wasm_ml::attestation::{attest_vm_token, attest_gpu_token, verify_attestation_token, detect_tee_type};
 
 // Model parameters - MUST match Python configuration
 const N_ESTIMATORS: usize = 200;
@@ -36,11 +36,26 @@ const MODEL_PATH: &str = "data/model_diabetes_wasm.bin";
 fn perform_attestation() -> Result<(), Box<dyn Error>> {
     println!("\n=== TEE ATTESTATION PHASE ===\n");
     
-    // Step 1: Attest VM (TDX or SEV-SNP)
-    println!("[🔐 ATTESTATION] Attesting VM (TDX/SEV-SNP)...");
+    // Step 0: Detect TEE type
+    println!("[🔍 DETECTION] Detecting TEE environment...");
+    match detect_tee_type() {
+        Ok(tee_info) => {
+            println!("[✓ TEE] Detected: {}", tee_info.tee_type);
+            println!("  Supports attestation: {}", if tee_info.supports_attestation { "YES" } else { "NO" });
+        }
+        Err(e) => {
+            println!("[⚠️  TEE] Detection failed: {}", e);
+        }
+    }
+    
+    // Step 1: Attest VM (TDX or AMD SEV-SNP)
+    println!("\n[🔐 ATTESTATION] Attesting VM (TDX/SEV-SNP)...");
     match attest_vm_token() {
         Ok(result) => {
             println!("[✓ VM] Attestation successful!");
+            if let Some(tee_type) = &result.tee_type {
+                println!("  TEE Type: {}", tee_type);
+            }
             if let Some(token) = &result.token {
                 println!("  Token length: {} chars", token.len());
                 
@@ -53,6 +68,9 @@ fn perform_attestation() -> Result<(), Box<dyn Error>> {
             }
             if let Some(evidence) = &result.evidence {
                 println!("  Evidence available: {} bytes", evidence.len());
+                // Print first few lines of evidence for debugging
+                let preview: String = evidence.lines().take(5).collect::<Vec<_>>().join("\n");
+                println!("  Evidence preview:\n{}", preview);
             }
         }
         Err(e) => {
@@ -61,7 +79,7 @@ fn perform_attestation() -> Result<(), Box<dyn Error>> {
         }
     }
     
-    // Step 2: Attest GPU (NVIDIA H100 via NRAS)
+    // Step 2: Attest GPU (NVIDIA H100 via LOCAL or NRAS)
     println!("\n[🔐 ATTESTATION] Attesting GPU (NVIDIA H100)...");
     match attest_gpu_token(0) {
         Ok(result) => {

@@ -31,7 +31,7 @@ echo "✓ Rust installed: $RUST_VERSION"
 # ─────────────────────────────────────────────────
 # [2/4] Parse arguments
 # ─────────────────────────────────────────────────
-FEATURES="attestation-all"  # Default: TDX + NVIDIA GPU attestation
+FEATURES="attestation-azure"  # Default for Azure: AMD SEV-SNP + NVIDIA GPU
 CLEAN=false
 DEBUG=false
 
@@ -49,25 +49,44 @@ for arg in "$@"; do
             FEATURES="attestation-tdx"
             echo "📦 Building with TDX attestation only"
             ;;
+        --amd-only)
+            FEATURES="attestation-amd"
+            echo "📦 Building with AMD SEV-SNP attestation only"
+            ;;
+        --azure)
+            FEATURES="attestation-azure"
+            echo "📦 Building for Azure CVM (AMD SEV-SNP + NVIDIA GPU)"
+            ;;
+        --all)
+            FEATURES="attestation-all"
+            echo "📦 Building with ALL attestation support (TDX + AMD + NVIDIA)"
+            ;;
         --clean)
             CLEAN=true
             ;;
         --debug)
             DEBUG=true
             ;;
+        --release)
+            DEBUG=false
+            ;;
         --help)
             echo ""
             echo "Usage: $0 [OPTIONS]"
             echo ""
             echo "Options:"
-            echo "  --no-attestation   Build without TEE attestation support"
+            echo "  --azure            Build for Azure CVM (AMD SEV-SNP + NVIDIA GPU) [DEFAULT]"
+            echo "  --all              Build with ALL attestation (TDX + AMD + NVIDIA)"
+            echo "  --amd-only         Build with AMD SEV-SNP attestation only"
             echo "  --gpu-only         Build with NVIDIA GPU attestation only"
             echo "  --tdx-only         Build with Intel TDX attestation only"
+            echo "  --no-attestation   Build without TEE attestation support"
             echo "  --clean            Clean before building"
             echo "  --debug            Build in debug mode (faster compile)"
+            echo "  --release          Build in release mode (optimized) [DEFAULT]"
             echo "  --help             Show this help message"
             echo ""
-            echo "Default: Build with full attestation (TDX + GPU)"
+            echo "Default: --azure --release (Azure CVM with AMD SEV-SNP + NVIDIA GPU)"
             echo ""
             exit 0
             ;;
@@ -156,8 +175,11 @@ if [ -n "$FEATURES" ]; then
     if [[ "$FEATURES" == *"attestation-tdx"* ]] || [[ "$FEATURES" == *"attestation-all"* ]]; then
         echo "  ✓ Intel TDX VM attestation"
     fi
-    if [[ "$FEATURES" == *"attestation-nvidia"* ]] || [[ "$FEATURES" == *"attestation-all"* ]]; then
-        echo "  ✓ NVIDIA GPU attestation (NRAS)"
+    if [[ "$FEATURES" == *"attestation-amd"* ]] || [[ "$FEATURES" == *"attestation-azure"* ]] || [[ "$FEATURES" == *"attestation-all"* ]]; then
+        echo "  ✓ AMD SEV-SNP VM attestation (via vTPM)"
+    fi
+    if [[ "$FEATURES" == *"attestation-nvidia"* ]] || [[ "$FEATURES" == *"attestation-azure"* ]] || [[ "$FEATURES" == *"attestation-all"* ]]; then
+        echo "  ✓ NVIDIA GPU attestation (LOCAL + NRAS)"
     fi
 else
     echo "  ⚠️  No attestation (use default build for TEE support)"

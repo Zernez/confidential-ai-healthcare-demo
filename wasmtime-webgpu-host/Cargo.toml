@@ -25,16 +25,30 @@ log = "0.4"
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
 hex = "0.4"  # For encoding binary data
+bincode = "1.3"  # For serializing attestation evidence
+base64 = "0.22"  # For base64 encoding
 
-# Attestation
+# Attestation - lunal-attestation for TDX and NVIDIA
 lunal-attestation = { path = "../attestation-rs/lunal-attestation", optional = true }
+
+# AMD SEV-SNP attestation via vTPM
+amd-vtpm = { path = "../attestation-rs/amd-vtpm", optional = true }
+vtpm-attestation = { path = "../attestation-rs/vtpm-attestation", optional = true }
+
+# SEV crate for parsing SNP reports
+sev = { version = "6.2.1", features = ["crypto_nossl"], optional = true }
 
 [features]
 default = []
-# Attestation features (map to lunal-attestation features)
+
+# Individual attestation features
 attestation-tdx = ["lunal-attestation", "lunal-attestation/attestation-tdx"]
 attestation-nvidia = ["lunal-attestation", "lunal-attestation/attestation-nvidia"]
-attestation-all = ["attestation-tdx", "attestation-nvidia"]  # Solo TDX + GPU
+attestation-amd = ["amd-vtpm", "amd-vtpm/attester", "vtpm-attestation", "vtpm-attestation/tpm", "sev"]
+
+# Combined features
+attestation-all = ["attestation-tdx", "attestation-nvidia", "attestation-amd"]
+attestation-azure = ["attestation-amd", "attestation-nvidia"]  # Azure CVM with H100
 
 [[bin]]
 name = "wasmtime-webgpu-host"
