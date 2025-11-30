@@ -2,13 +2,17 @@
 //!
 //! Implements the wasi:gpu interface as Wasmtime host functions.
 //! These bridge between the WASM module and the actual GPU backend.
+//!
+//! The ABI follows wit-bindgen's conventions for result types:
+//! - Functions with result<T, E> take an extra retptr parameter
+//! - Return value: 0 = success (value at retptr), 1 = error (error at retptr)
 
 use crate::backend::{
     AverageParams, BatchPredictParams, BootstrapParams,
     ElementwiseOp, ElementwiseParams, FindSplitParams, GpuBackend, GpuError,
     MatmulParams, ReduceOp, ReduceParams,
 };
-use tracing::{error, info};
+use tracing::{debug, error, info};
 use wasmtime::{Caller, Linker};
 
 /// GPU State accessible from host functions
@@ -30,20 +34,20 @@ impl GpuState {
     }
 }
 
-/// Error code conversion
-fn error_to_code(err: &GpuError) -> u32 {
+/// Error code for GpuError variant discrimination
+fn error_discriminant(err: &GpuError) -> u32 {
     match err {
-        GpuError::OutOfMemory => 1,
-        GpuError::InvalidBuffer(_) => 2,
-        GpuError::KernelError(_) => 3,
-        GpuError::DeviceUnavailable => 4,
-        GpuError::InvalidParams(_) => 5,
-        GpuError::BackendError(_) => 6,
+        GpuError::OutOfMemory => 0,
+        GpuError::InvalidBuffer(_) => 1,
+        GpuError::KernelError(_) => 2,
+        GpuError::DeviceUnavailable => 3,
+        GpuError::InvalidParams(_) => 4,
+        GpuError::BackendError(_) => 5,
     }
 }
 
 /// Helper to read bytes from WASM memory
-fn read_memory<T>(caller: &mut Caller<'_, T>, ptr: u32, len: usize) -> Option<Vec<u8>> {
+fn read_memory<T>(caller: &Caller<'_, T>, ptr: u32, len: usize) -> Option<Vec<u8>> {
     let memory = caller.get_export("memory")?.into_memory()?;
     let mut buf = vec![0u8; len];
     memory.read(&*caller, ptr as usize, &mut buf).ok()?;
@@ -59,12 +63,22 @@ fn write_memory<T>(caller: &mut Caller<'_, T>, ptr: u32, data: &[u8]) -> bool {
     }
 }
 
+/// Write a u32 to WASM memory
+fn write_u32<T>(caller: &mut Caller<'_, T>, ptr: u32, value: u32) -> bool {
+    write_memory(caller, ptr, &value.to_le_bytes())
+}
+
+/// Write a u64 to WASM memory  
+fn write_u64<T>(caller: &mut Caller<'_, T>, ptr: u32, value: u64) -> bool {
+    write_memory(caller, ptr, &value.to_le_bytes())
+}
+
 /// Register all wasi:gpu host functions with the linker
 /// 
 /// Functions are registered with versioned module names to match WIT component model:
 /// - wasi:gpu/compute@0.1.0
 /// - wasi:gpu/ml-kernels@0.1.0
-pub fn add_to_linker<T>(
+pub fn add_to_linker<T: 'static>(
     linker: &mut Linker<T>,
     get_state: impl Fn(&mut T) -> &mut GpuState + Send + Sync + Copy + 'static,
 ) -> anyhow::Result<()> {
@@ -76,18 +90,15 @@ pub fn add_to_linker<T>(
     // wasi:gpu/compute@0.1.0 interface
     // ═══════════════════════════════════════════════════════════════════════
     
-    // get-device-info
+    // get-device-info: func() -> device-info
+    // ABI: (retptr: i32) -> ()
+    // Writes DeviceInfo struct to retptr
     linker.func_wrap(
         COMPUTE_MODULE,
         "get-device-info",
-        move |mut caller: Caller<'_, T>,
-              name_ptr: u32, name_len: u32,
-              backend_ptr: u32, backend_len: u32,
-              memory_ptr: u32,
-              hardware_ptr: u32,
-              compute_cap_ptr: u32, compute_cap_len: u32| {
+        move |mut caller: Caller<'_, T>, retptr: i32| {
+            debug!("[Host] get-device-info called");
             
-            // Get device info first (borrow state)
             let (name, backend, total_memory, is_hardware, compute_cap) = {
                 let state = get_state(caller.data_mut());
                 let info = state.backend().device_info();
@@ -100,126 +111,190 @@ pub fn add_to_linker<T>(
                 )
             };
             
-            // Now write to memory (state borrow released)
+            // Write strings and struct to retptr
+            // DeviceInfo layout: name_ptr, name_len, backend_ptr, backend_len, total_memory, is_hardware, cc_ptr, cc_len
+            let retptr = retptr as u32;
+            
+            // For simplicity, write the full struct at retptr
+            // Actual layout depends on wit-bindgen version
             let name_bytes = name.as_bytes();
-            let name_write_len = name_bytes.len().min(name_len as usize);
-            write_memory(&mut caller, name_ptr, &name_bytes[..name_write_len]);
-            
             let backend_bytes = backend.as_bytes();
-            let backend_write_len = backend_bytes.len().min(backend_len as usize);
-            write_memory(&mut caller, backend_ptr, &backend_bytes[..backend_write_len]);
-            
-            write_memory(&mut caller, memory_ptr, &total_memory.to_le_bytes());
-            
-            let hw: u32 = if is_hardware { 1 } else { 0 };
-            write_memory(&mut caller, hardware_ptr, &hw.to_le_bytes());
-            
             let cc_bytes = compute_cap.as_bytes();
-            let cc_write_len = cc_bytes.len().min(compute_cap_len as usize);
-            write_memory(&mut caller, compute_cap_ptr, &cc_bytes[..cc_write_len]);
+            
+            // Write name at offset 0 (after struct)
+            let name_offset = retptr + 48; // After struct fields
+            write_memory(&mut caller, name_offset, name_bytes);
+            write_u32(&mut caller, retptr, name_offset);
+            write_u32(&mut caller, retptr + 4, name_bytes.len() as u32);
+            
+            // Write backend at offset after name
+            let backend_offset = name_offset + name_bytes.len() as u32;
+            write_memory(&mut caller, backend_offset, backend_bytes);
+            write_u32(&mut caller, retptr + 8, backend_offset);
+            write_u32(&mut caller, retptr + 12, backend_bytes.len() as u32);
+            
+            // Write total_memory
+            write_u64(&mut caller, retptr + 16, total_memory);
+            
+            // Write is_hardware
+            write_u32(&mut caller, retptr + 24, if is_hardware { 1 } else { 0 });
+            
+            // Write compute_capability
+            let cc_offset = backend_offset + backend_bytes.len() as u32;
+            write_memory(&mut caller, cc_offset, cc_bytes);
+            write_u32(&mut caller, retptr + 28, cc_offset);
+            write_u32(&mut caller, retptr + 32, cc_bytes.len() as u32);
         },
     )?;
     
-    // buffer-create
+    // buffer-create: func(size: u64, usage: buffer-usage) -> result<buffer-id, gpu-error>
+    // ABI: (size: i64, usage: i32, retptr: i32) -> ()
+    // Writes: discriminant (0=ok, 1=err) + payload at retptr
     linker.func_wrap(
         COMPUTE_MODULE,
         "buffer-create",
-        move |mut caller: Caller<'_, T>, size: u64, usage: u32, out_ptr: u32| -> u32 {
-            let state = get_state(caller.data_mut());
+        move |mut caller: Caller<'_, T>, size: i64, usage: i32, retptr: i32| {
+            debug!("[Host] buffer-create(size={}, usage={:#x})", size, usage);
             
-            match state.backend_mut().buffer_create(size, usage) {
+            let state = get_state(caller.data_mut());
+            let retptr = retptr as u32;
+            
+            match state.backend_mut().buffer_create(size as u64, usage as u32) {
                 Ok(id) => {
-                    write_memory(&mut caller, out_ptr, &id.to_le_bytes());
-                    0 // Success
+                    write_u32(&mut caller, retptr, 0); // Ok discriminant
+                    write_u32(&mut caller, retptr + 4, id); // buffer-id
                 }
                 Err(e) => {
                     error!("[Host] buffer-create failed: {:?}", e);
-                    error_to_code(&e)
+                    write_u32(&mut caller, retptr, 1); // Err discriminant
+                    write_u32(&mut caller, retptr + 4, error_discriminant(&e));
                 }
             }
         },
     )?;
     
-    // buffer-write
+    // buffer-write: func(buffer: buffer-id, offset: u64, data: list<u8>) -> result<_, gpu-error>
+    // ABI: (buffer: i32, offset: i64, data_ptr: i32, data_len: i32, retptr: i32) -> ()
     linker.func_wrap(
         COMPUTE_MODULE,
         "buffer-write",
-        move |mut caller: Caller<'_, T>, buffer: u32, offset: u64, data_ptr: u32, data_len: u32| -> u32 {
+        move |mut caller: Caller<'_, T>, buffer: i32, offset: i64, data_ptr: i32, data_len: i32, retptr: i32| {
+            debug!("[Host] buffer-write(buffer={}, offset={}, len={})", buffer, offset, data_len);
+            
             // Read data from WASM memory first
-            let data = match read_memory(&mut caller, data_ptr, data_len as usize) {
+            let data = match read_memory(&caller, data_ptr as u32, data_len as usize) {
                 Some(d) => d,
-                None => return 5, // Invalid params
+                None => {
+                    write_u32(&mut caller, retptr as u32, 1);
+                    write_u32(&mut caller, retptr as u32 + 4, 4); // invalid-params
+                    return;
+                }
             };
             
             let state = get_state(caller.data_mut());
+            let retptr = retptr as u32;
             
-            match state.backend_mut().buffer_write(buffer, offset, &data) {
-                Ok(()) => 0,
+            match state.backend_mut().buffer_write(buffer as u32, offset as u64, &data) {
+                Ok(()) => {
+                    write_u32(&mut caller, retptr, 0); // Ok
+                }
                 Err(e) => {
                     error!("[Host] buffer-write failed: {:?}", e);
-                    error_to_code(&e)
+                    write_u32(&mut caller, retptr, 1);
+                    write_u32(&mut caller, retptr + 4, error_discriminant(&e));
                 }
             }
         },
     )?;
     
-    // buffer-read
+    // buffer-read: func(buffer: buffer-id, offset: u64, size: u32) -> result<list<u8>, gpu-error>
+    // ABI: (buffer: i32, offset: i64, size: i32, retptr: i32) -> ()
     linker.func_wrap(
         COMPUTE_MODULE,
         "buffer-read",
-        move |mut caller: Caller<'_, T>, buffer: u32, offset: u64, size: u32, out_ptr: u32, out_len_ptr: u32| -> u32 {
-            // Read from backend first
+        move |mut caller: Caller<'_, T>, buffer: i32, offset: i64, size: i32, retptr: i32| {
+            debug!("[Host] buffer-read(buffer={}, offset={}, size={})", buffer, offset, size);
+            
             let data = {
                 let state = get_state(caller.data_mut());
-                match state.backend().buffer_read(buffer, offset, size) {
+                match state.backend().buffer_read(buffer as u32, offset as u64, size as u32) {
                     Ok(d) => d,
                     Err(e) => {
                         error!("[Host] buffer-read failed: {:?}", e);
-                        return error_to_code(&e);
+                        write_u32(&mut caller, retptr as u32, 1);
+                        write_u32(&mut caller, retptr as u32 + 4, error_discriminant(&e));
+                        return;
                     }
                 }
             };
             
-            // Write to WASM memory
-            write_memory(&mut caller, out_ptr, &data);
-            write_memory(&mut caller, out_len_ptr, &(data.len() as u32).to_le_bytes());
-            0
+            let retptr = retptr as u32;
+            
+            // Allocate memory for the result using realloc
+            // For now, write ptr+len at retptr (caller should have allocated space)
+            // This is a simplification - real implementation needs cabi_realloc
+            write_u32(&mut caller, retptr, 0); // Ok
+            // Write data to a fixed location (this is a hack - real impl needs malloc)
+            let data_ptr = retptr + 8;
+            write_memory(&mut caller, data_ptr, &data);
+            write_u32(&mut caller, retptr + 4, data_ptr);
+            write_u32(&mut caller, retptr + 8, data.len() as u32);
         },
     )?;
     
-    // buffer-copy
+    // buffer-copy: func(src, src-offset, dst, dst-offset, size) -> result<_, gpu-error>
+    // ABI: (src: i32, src_offset: i64, dst: i32, dst_offset: i64, size: i64, retptr: i32) -> ()
     linker.func_wrap(
         COMPUTE_MODULE,
         "buffer-copy",
-        move |mut caller: Caller<'_, T>, src: u32, src_offset: u64, dst: u32, dst_offset: u64, size: u64| -> u32 {
-            let state = get_state(caller.data_mut());
+        move |mut caller: Caller<'_, T>, src: i32, src_offset: i64, dst: i32, dst_offset: i64, size: i64, retptr: i32| {
+            debug!("[Host] buffer-copy(src={}, dst={}, size={})", src, dst, size);
             
-            match state.backend_mut().buffer_copy(src, src_offset, dst, dst_offset, size) {
-                Ok(()) => 0,
-                Err(e) => error_to_code(&e)
+            let state = get_state(caller.data_mut());
+            let retptr = retptr as u32;
+            
+            match state.backend_mut().buffer_copy(src as u32, src_offset as u64, dst as u32, dst_offset as u64, size as u64) {
+                Ok(()) => {
+                    write_u32(&mut caller, retptr, 0);
+                }
+                Err(e) => {
+                    write_u32(&mut caller, retptr, 1);
+                    write_u32(&mut caller, retptr + 4, error_discriminant(&e));
+                }
             }
         },
     )?;
     
-    // buffer-destroy
+    // buffer-destroy: func(buffer: buffer-id) -> result<_, gpu-error>
+    // ABI: (buffer: i32, retptr: i32) -> ()
     linker.func_wrap(
         COMPUTE_MODULE,
         "buffer-destroy",
-        move |mut caller: Caller<'_, T>, buffer: u32| -> u32 {
-            let state = get_state(caller.data_mut());
+        move |mut caller: Caller<'_, T>, buffer: i32, retptr: i32| {
+            debug!("[Host] buffer-destroy(buffer={})", buffer);
             
-            match state.backend_mut().buffer_destroy(buffer) {
-                Ok(()) => 0,
-                Err(e) => error_to_code(&e)
+            let state = get_state(caller.data_mut());
+            let retptr = retptr as u32;
+            
+            match state.backend_mut().buffer_destroy(buffer as u32) {
+                Ok(()) => {
+                    write_u32(&mut caller, retptr, 0);
+                }
+                Err(e) => {
+                    write_u32(&mut caller, retptr, 1);
+                    write_u32(&mut caller, retptr + 4, error_discriminant(&e));
+                }
             }
         },
     )?;
     
-    // sync
+    // sync: func() -> ()
+    // ABI: () -> ()
     linker.func_wrap(
         COMPUTE_MODULE,
         "sync",
         move |mut caller: Caller<'_, T>| {
+            debug!("[Host] sync()");
             let state = get_state(caller.data_mut());
             state.backend().sync();
         },
@@ -229,15 +304,21 @@ pub fn add_to_linker<T>(
     // wasi:gpu/ml-kernels@0.1.0 interface
     // ═══════════════════════════════════════════════════════════════════════
     
-    // kernel-bootstrap-sample
+    // kernel-bootstrap-sample: func(params: bootstrap-params, output: buffer-id) -> result<_, gpu-error>
+    // ABI: (params: i32, output: i32, retptr: i32) -> ()
     linker.func_wrap(
         ML_KERNELS_MODULE,
         "kernel-bootstrap-sample",
-        move |mut caller: Caller<'_, T>, params_ptr: u32, output: u32| -> u32 {
-            // Read params first
-            let params_bytes = match read_memory(&mut caller, params_ptr, 12) {
+        move |mut caller: Caller<'_, T>, params_ptr: i32, output: i32, retptr: i32| {
+            debug!("[Host] kernel-bootstrap-sample");
+            
+            let params_bytes = match read_memory(&caller, params_ptr as u32, 12) {
                 Some(b) => b,
-                None => return 5,
+                None => {
+                    write_u32(&mut caller, retptr as u32, 1);
+                    write_u32(&mut caller, retptr as u32 + 4, 4);
+                    return;
+                }
             };
             
             let params = BootstrapParams {
@@ -247,10 +328,14 @@ pub fn add_to_linker<T>(
             };
             
             let state = get_state(caller.data_mut());
+            let retptr = retptr as u32;
             
-            match state.backend_mut().kernel_bootstrap_sample(&params, output) {
-                Ok(()) => 0,
-                Err(e) => error_to_code(&e)
+            match state.backend_mut().kernel_bootstrap_sample(&params, output as u32) {
+                Ok(()) => write_u32(&mut caller, retptr, 0),
+                Err(e) => {
+                    write_u32(&mut caller, retptr, 1);
+                    write_u32(&mut caller, retptr + 4, error_discriminant(&e));
+                }
             }
         },
     )?;
@@ -260,12 +345,18 @@ pub fn add_to_linker<T>(
         ML_KERNELS_MODULE,
         "kernel-find-split",
         move |mut caller: Caller<'_, T>, 
-              params_ptr: u32,
-              data: u32, labels: u32, indices: u32, thresholds: u32, output_scores: u32| -> u32 {
+              params_ptr: i32,
+              data: i32, labels: i32, indices: i32, thresholds: i32, output_scores: i32,
+              retptr: i32| {
+            debug!("[Host] kernel-find-split");
             
-            let params_bytes = match read_memory(&mut caller, params_ptr, 16) {
+            let params_bytes = match read_memory(&caller, params_ptr as u32, 16) {
                 Some(b) => b,
-                None => return 5,
+                None => {
+                    write_u32(&mut caller, retptr as u32, 1);
+                    write_u32(&mut caller, retptr as u32 + 4, 4);
+                    return;
+                }
             };
             
             let params = FindSplitParams {
@@ -276,10 +367,14 @@ pub fn add_to_linker<T>(
             };
             
             let state = get_state(caller.data_mut());
+            let retptr = retptr as u32;
             
-            match state.backend_mut().kernel_find_split(&params, data, labels, indices, thresholds, output_scores) {
-                Ok(()) => 0,
-                Err(e) => error_to_code(&e)
+            match state.backend_mut().kernel_find_split(&params, data as u32, labels as u32, indices as u32, thresholds as u32, output_scores as u32) {
+                Ok(()) => write_u32(&mut caller, retptr, 0),
+                Err(e) => {
+                    write_u32(&mut caller, retptr, 1);
+                    write_u32(&mut caller, retptr + 4, error_discriminant(&e));
+                }
             }
         },
     )?;
@@ -288,10 +383,16 @@ pub fn add_to_linker<T>(
     linker.func_wrap(
         ML_KERNELS_MODULE,
         "kernel-average",
-        move |mut caller: Caller<'_, T>, params_ptr: u32, tree_predictions: u32, output: u32| -> u32 {
-            let params_bytes = match read_memory(&mut caller, params_ptr, 8) {
+        move |mut caller: Caller<'_, T>, params_ptr: i32, tree_predictions: i32, output: i32, retptr: i32| {
+            debug!("[Host] kernel-average");
+            
+            let params_bytes = match read_memory(&caller, params_ptr as u32, 8) {
                 Some(b) => b,
-                None => return 5,
+                None => {
+                    write_u32(&mut caller, retptr as u32, 1);
+                    write_u32(&mut caller, retptr as u32 + 4, 4);
+                    return;
+                }
             };
             
             let params = AverageParams {
@@ -300,10 +401,14 @@ pub fn add_to_linker<T>(
             };
             
             let state = get_state(caller.data_mut());
+            let retptr = retptr as u32;
             
-            match state.backend_mut().kernel_average(&params, tree_predictions, output) {
-                Ok(()) => 0,
-                Err(e) => error_to_code(&e)
+            match state.backend_mut().kernel_average(&params, tree_predictions as u32, output as u32) {
+                Ok(()) => write_u32(&mut caller, retptr, 0),
+                Err(e) => {
+                    write_u32(&mut caller, retptr, 1);
+                    write_u32(&mut caller, retptr + 4, error_discriminant(&e));
+                }
             }
         },
     )?;
@@ -312,10 +417,16 @@ pub fn add_to_linker<T>(
     linker.func_wrap(
         ML_KERNELS_MODULE,
         "kernel-matmul",
-        move |mut caller: Caller<'_, T>, params_ptr: u32, a: u32, b: u32, c: u32| -> u32 {
-            let params_bytes = match read_memory(&mut caller, params_ptr, 24) {
+        move |mut caller: Caller<'_, T>, params_ptr: i32, a: i32, b: i32, c: i32, retptr: i32| {
+            debug!("[Host] kernel-matmul");
+            
+            let params_bytes = match read_memory(&caller, params_ptr as u32, 28) {
                 Some(b) => b,
-                None => return 5,
+                None => {
+                    write_u32(&mut caller, retptr as u32, 1);
+                    write_u32(&mut caller, retptr as u32 + 4, 4);
+                    return;
+                }
             };
             
             let params = MatmulParams {
@@ -325,14 +436,18 @@ pub fn add_to_linker<T>(
                 trans_a: params_bytes[12] != 0,
                 trans_b: params_bytes[16] != 0,
                 alpha: f32::from_le_bytes([params_bytes[20], params_bytes[21], params_bytes[22], params_bytes[23]]),
-                beta: 0.0,
+                beta: f32::from_le_bytes([params_bytes[24], params_bytes[25], params_bytes[26], params_bytes[27]]),
             };
             
             let state = get_state(caller.data_mut());
+            let retptr = retptr as u32;
             
-            match state.backend_mut().kernel_matmul(&params, a, b, c) {
-                Ok(()) => 0,
-                Err(e) => error_to_code(&e)
+            match state.backend_mut().kernel_matmul(&params, a as u32, b as u32, c as u32) {
+                Ok(()) => write_u32(&mut caller, retptr, 0),
+                Err(e) => {
+                    write_u32(&mut caller, retptr, 1);
+                    write_u32(&mut caller, retptr + 4, error_discriminant(&e));
+                }
             }
         },
     )?;
@@ -341,10 +456,16 @@ pub fn add_to_linker<T>(
     linker.func_wrap(
         ML_KERNELS_MODULE,
         "kernel-elementwise",
-        move |mut caller: Caller<'_, T>, params_ptr: u32, input_a: u32, input_b: u32, output: u32| -> u32 {
-            let params_bytes = match read_memory(&mut caller, params_ptr, 8) {
+        move |mut caller: Caller<'_, T>, params_ptr: i32, input_a: i32, input_b: i32, output: i32, retptr: i32| {
+            debug!("[Host] kernel-elementwise");
+            
+            let params_bytes = match read_memory(&caller, params_ptr as u32, 8) {
                 Some(b) => b,
-                None => return 5,
+                None => {
+                    write_u32(&mut caller, retptr as u32, 1);
+                    write_u32(&mut caller, retptr as u32 + 4, 4);
+                    return;
+                }
             };
             
             let n_elements = u32::from_le_bytes([params_bytes[0], params_bytes[1], params_bytes[2], params_bytes[3]]);
@@ -359,17 +480,25 @@ pub fn add_to_linker<T>(
                 5 => ElementwiseOp::Sqrt,
                 6 => ElementwiseOp::Exp,
                 7 => ElementwiseOp::Log,
-                _ => return 5,
+                _ => {
+                    write_u32(&mut caller, retptr as u32, 1);
+                    write_u32(&mut caller, retptr as u32 + 4, 4);
+                    return;
+                }
             };
             
             let params = ElementwiseParams { n_elements, op };
-            let input_b_opt = if input_b == 0 { None } else { Some(input_b) };
+            let input_b_opt = if input_b == 0 { None } else { Some(input_b as u32) };
             
             let state = get_state(caller.data_mut());
+            let retptr = retptr as u32;
             
-            match state.backend_mut().kernel_elementwise(&params, input_a, input_b_opt, output) {
-                Ok(()) => 0,
-                Err(e) => error_to_code(&e)
+            match state.backend_mut().kernel_elementwise(&params, input_a as u32, input_b_opt, output as u32) {
+                Ok(()) => write_u32(&mut caller, retptr, 0),
+                Err(e) => {
+                    write_u32(&mut caller, retptr, 1);
+                    write_u32(&mut caller, retptr + 4, error_discriminant(&e));
+                }
             }
         },
     )?;
@@ -378,10 +507,16 @@ pub fn add_to_linker<T>(
     linker.func_wrap(
         ML_KERNELS_MODULE,
         "kernel-reduce",
-        move |mut caller: Caller<'_, T>, params_ptr: u32, input: u32, output: u32| -> u32 {
-            let params_bytes = match read_memory(&mut caller, params_ptr, 8) {
+        move |mut caller: Caller<'_, T>, params_ptr: i32, input: i32, output: i32, retptr: i32| {
+            debug!("[Host] kernel-reduce");
+            
+            let params_bytes = match read_memory(&caller, params_ptr as u32, 8) {
                 Some(b) => b,
-                None => return 5,
+                None => {
+                    write_u32(&mut caller, retptr as u32, 1);
+                    write_u32(&mut caller, retptr as u32 + 4, 4);
+                    return;
+                }
             };
             
             let n_elements = u32::from_le_bytes([params_bytes[0], params_bytes[1], params_bytes[2], params_bytes[3]]);
@@ -393,16 +528,24 @@ pub fn add_to_linker<T>(
                 2 => ReduceOp::Min,
                 3 => ReduceOp::Mean,
                 4 => ReduceOp::Variance,
-                _ => return 5,
+                _ => {
+                    write_u32(&mut caller, retptr as u32, 1);
+                    write_u32(&mut caller, retptr as u32 + 4, 4);
+                    return;
+                }
             };
             
             let params = ReduceParams { n_elements, op };
             
             let state = get_state(caller.data_mut());
+            let retptr = retptr as u32;
             
-            match state.backend_mut().kernel_reduce(&params, input, output) {
-                Ok(()) => 0,
-                Err(e) => error_to_code(&e)
+            match state.backend_mut().kernel_reduce(&params, input as u32, output as u32) {
+                Ok(()) => write_u32(&mut caller, retptr, 0),
+                Err(e) => {
+                    write_u32(&mut caller, retptr, 1);
+                    write_u32(&mut caller, retptr + 4, error_discriminant(&e));
+                }
             }
         },
     )?;
@@ -412,12 +555,18 @@ pub fn add_to_linker<T>(
         ML_KERNELS_MODULE,
         "kernel-batch-predict",
         move |mut caller: Caller<'_, T>, 
-              params_ptr: u32,
-              samples: u32, tree_nodes: u32, tree_offsets: u32, output: u32| -> u32 {
+              params_ptr: i32,
+              samples: i32, tree_nodes: i32, tree_offsets: i32, output: i32,
+              retptr: i32| {
+            debug!("[Host] kernel-batch-predict");
             
-            let params_bytes = match read_memory(&mut caller, params_ptr, 16) {
+            let params_bytes = match read_memory(&caller, params_ptr as u32, 16) {
                 Some(b) => b,
-                None => return 5,
+                None => {
+                    write_u32(&mut caller, retptr as u32, 1);
+                    write_u32(&mut caller, retptr as u32 + 4, 4);
+                    return;
+                }
             };
             
             let params = BatchPredictParams {
@@ -428,10 +577,14 @@ pub fn add_to_linker<T>(
             };
             
             let state = get_state(caller.data_mut());
+            let retptr = retptr as u32;
             
-            match state.backend_mut().kernel_batch_predict(&params, samples, tree_nodes, tree_offsets, output) {
-                Ok(()) => 0,
-                Err(e) => error_to_code(&e)
+            match state.backend_mut().kernel_batch_predict(&params, samples as u32, tree_nodes as u32, tree_offsets as u32, output as u32) {
+                Ok(()) => write_u32(&mut caller, retptr, 0),
+                Err(e) => {
+                    write_u32(&mut caller, retptr, 1);
+                    write_u32(&mut caller, retptr + 4, error_discriminant(&e));
+                }
             }
         },
     )?;
