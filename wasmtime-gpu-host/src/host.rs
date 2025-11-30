@@ -193,7 +193,7 @@ pub fn add_to_linker<T: 'static>(
             let state = get_state(caller.data_mut());
             
             match state.backend_mut().buffer_write(buffer as u32, offset as u64, &data) {
-                Ok(()) => write_i32(&mut caller, retptr, 0),
+                Ok(()) => { write_i32(&mut caller, retptr, 0); }
                 Err(e) => {
                     error!("[Host] buffer-write failed: {:?}", e);
                     write_i32(&mut caller, retptr, 1);
@@ -244,7 +244,7 @@ pub fn add_to_linker<T: 'static>(
             let state = get_state(caller.data_mut());
             
             match state.backend_mut().buffer_copy(src as u32, src_offset as u64, dst as u32, dst_offset as u64, size as u64) {
-                Ok(()) => write_i32(&mut caller, retptr, 0),
+                Ok(()) => { write_i32(&mut caller, retptr, 0); }
                 Err(e) => {
                     write_i32(&mut caller, retptr, 1);
                     write_i32(&mut caller, retptr + 4, error_discriminant(&e));
@@ -263,7 +263,7 @@ pub fn add_to_linker<T: 'static>(
             let state = get_state(caller.data_mut());
             
             match state.backend_mut().buffer_destroy(buffer as u32) {
-                Ok(()) => write_i32(&mut caller, retptr, 0),
+                Ok(()) => { write_i32(&mut caller, retptr, 0); }
                 Err(e) => {
                     write_i32(&mut caller, retptr, 1);
                     write_i32(&mut caller, retptr + 4, error_discriminant(&e));
@@ -308,7 +308,7 @@ pub fn add_to_linker<T: 'static>(
             let state = get_state(caller.data_mut());
             
             match state.backend_mut().kernel_bootstrap_sample(&params, output as u32) {
-                Ok(()) => write_i32(&mut caller, retptr, 0),
+                Ok(()) => { write_i32(&mut caller, retptr, 0); }
                 Err(e) => {
                     write_i32(&mut caller, retptr, 1);
                     write_i32(&mut caller, retptr + 4, error_discriminant(&e));
@@ -343,7 +343,7 @@ pub fn add_to_linker<T: 'static>(
                 &params, 
                 data as u32, labels as u32, indices as u32, thresholds as u32, output_scores as u32
             ) {
-                Ok(()) => write_i32(&mut caller, retptr, 0),
+                Ok(()) => { write_i32(&mut caller, retptr, 0); }
                 Err(e) => {
                     write_i32(&mut caller, retptr, 1);
                     write_i32(&mut caller, retptr + 4, error_discriminant(&e));
@@ -372,7 +372,7 @@ pub fn add_to_linker<T: 'static>(
             let state = get_state(caller.data_mut());
             
             match state.backend_mut().kernel_average(&params, tree_predictions as u32, output as u32) {
-                Ok(()) => write_i32(&mut caller, retptr, 0),
+                Ok(()) => { write_i32(&mut caller, retptr, 0); }
                 Err(e) => {
                     write_i32(&mut caller, retptr, 1);
                     write_i32(&mut caller, retptr + 4, error_discriminant(&e));
@@ -408,7 +408,7 @@ pub fn add_to_linker<T: 'static>(
             let state = get_state(caller.data_mut());
             
             match state.backend_mut().kernel_matmul(&params, a as u32, b as u32, c as u32) {
-                Ok(()) => write_i32(&mut caller, retptr, 0),
+                Ok(()) => { write_i32(&mut caller, retptr, 0); }
                 Err(e) => {
                     write_i32(&mut caller, retptr, 1);
                     write_i32(&mut caller, retptr + 4, error_discriminant(&e));
@@ -457,7 +457,7 @@ pub fn add_to_linker<T: 'static>(
             let state = get_state(caller.data_mut());
             
             match state.backend_mut().kernel_elementwise(&params, input_a as u32, input_b_opt, output as u32) {
-                Ok(()) => write_i32(&mut caller, retptr, 0),
+                Ok(()) => { write_i32(&mut caller, retptr, 0); }
                 Err(e) => {
                     write_i32(&mut caller, retptr, 1);
                     write_i32(&mut caller, retptr + 4, error_discriminant(&e));
@@ -499,7 +499,7 @@ pub fn add_to_linker<T: 'static>(
             let state = get_state(caller.data_mut());
             
             match state.backend_mut().kernel_reduce(&params, input as u32, output as u32) {
-                Ok(()) => write_i32(&mut caller, retptr, 0),
+                Ok(()) => { write_i32(&mut caller, retptr, 0); }
                 Err(e) => {
                     write_i32(&mut caller, retptr, 1);
                     write_i32(&mut caller, retptr + 4, error_discriminant(&e));
@@ -534,7 +534,7 @@ pub fn add_to_linker<T: 'static>(
                 &params, 
                 samples as u32, tree_nodes as u32, tree_offsets as u32, output as u32
             ) {
-                Ok(()) => write_i32(&mut caller, retptr, 0),
+                Ok(()) => { write_i32(&mut caller, retptr, 0); }
                 Err(e) => {
                     write_i32(&mut caller, retptr, 1);
                     write_i32(&mut caller, retptr + 4, error_discriminant(&e));
