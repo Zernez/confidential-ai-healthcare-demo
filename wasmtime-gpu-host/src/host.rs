@@ -234,6 +234,7 @@ pub fn add_to_linker<T: 'static>(
     )?;
     
     // buffer-read: func(buffer: buffer-id, offset: u64, size: u32) -> result<list<u8>, gpu-error>
+    // Returns list<u8> which needs cabi_realloc for memory allocation
     linker.func_wrap(
         COMPUTE_MODULE,
         "buffer-read",
@@ -253,14 +254,42 @@ pub fn add_to_linker<T: 'static>(
                 }
             };
             
-            // Need to call cabi_realloc to allocate space for result
-            // For now, assume caller provides enough space after retptr
+            // Allocate memory in WASM for the result using cabi_realloc
+            let realloc = match caller.get_export("cabi_realloc") {
+                Some(Extern::Func(f)) => f,
+                _ => {
+                    error!("[Host] cabi_realloc not found for buffer-read");
+                    write_i32(&mut caller, retptr, 1);
+                    write_i32(&mut caller, retptr + 4, 4); // invalid-params
+                    return;
+                }
+            };
+            
+            let data_ptr = match realloc.typed::<(i32, i32, i32, i32), i32>(&caller) {
+                Ok(f) => match f.call(&mut caller, (0, 0, 1, data.len() as i32)) {
+                    Ok(ptr) => ptr,
+                    Err(e) => {
+                        error!("[Host] cabi_realloc failed for buffer-read: {:?}", e);
+                        write_i32(&mut caller, retptr, 1);
+                        write_i32(&mut caller, retptr + 4, 0); // out-of-memory
+                        return;
+                    }
+                },
+                Err(e) => {
+                    error!("[Host] cabi_realloc type error: {:?}", e);
+                    write_i32(&mut caller, retptr, 1);
+                    write_i32(&mut caller, retptr + 4, 4);
+                    return;
+                }
+            };
+            
+            // Write data to allocated memory
+            write_memory(&mut caller, data_ptr, &data);
+            
+            // Write result struct: discriminant(4) + ptr(4) + len(4)
             write_i32(&mut caller, retptr, 0); // Ok
-            let data_dest = retptr + 8;
-            write_i32(&mut caller, retptr + 4, data_dest); // ptr
+            write_i32(&mut caller, retptr + 4, data_ptr); // ptr to data
             write_i32(&mut caller, retptr + 8, data.len() as i32); // len
-            // Actually write data - this needs proper allocation
-            // The caller should use cabi_realloc
         },
     )?;
     
