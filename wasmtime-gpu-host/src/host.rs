@@ -14,7 +14,7 @@ use crate::backend::{
     MatmulParams, ReduceOp, ReduceParams,
 };
 use tracing::{debug, error, info};
-use wasmtime::{Caller, Linker};
+use wasmtime::{Caller, Extern, Linker};
 
 /// GPU State accessible from host functions
 pub struct GpuState {
@@ -87,7 +87,9 @@ pub fn add_to_linker<T: 'static>(
     // ═══════════════════════════════════════════════════════════════════════
     
     // get-device-info: func() -> device-info
-    // device-info has strings, so it uses retptr for the whole struct
+    // device-info record with strings uses cabi_realloc for string allocation
+    // Layout at retptr: name_ptr(4), name_len(4), backend_ptr(4), backend_len(4), 
+    //                   total_memory(8), is_hardware(4), cc_ptr(4), cc_len(4) = 36 bytes
     linker.func_wrap(
         COMPUTE_MODULE,
         "get-device-info",
@@ -106,37 +108,65 @@ pub fn add_to_linker<T: 'static>(
                 )
             };
             
-            // Layout: ptr, len for each string, then scalars
-            // Strings need to be allocated - use cabi_realloc or fixed buffer
-            // For simplicity, write inline after struct
             let name_bytes = name.as_bytes();
             let backend_bytes = backend.as_bytes();
             let cc_bytes = compute_cap.as_bytes();
             
-            let str_base = retptr + 40; // After struct fields
+            // Use cabi_realloc to allocate strings in WASM memory
+            let realloc = match caller.get_export("cabi_realloc") {
+                Some(Extern::Func(f)) => f,
+                _ => {
+                    error!("[Host] cabi_realloc not found");
+                    return;
+                }
+            };
             
-            // name (ptr, len)
-            write_i32(&mut caller, retptr, str_base);
-            write_i32(&mut caller, retptr + 4, name_bytes.len() as i32);
-            write_memory(&mut caller, str_base, name_bytes);
+            // Allocate name string
+            let name_ptr = match realloc.typed::<(i32, i32, i32, i32), i32>(&caller) {
+                Ok(f) => match f.call(&mut caller, (0, 0, 1, name_bytes.len() as i32)) {
+                    Ok(ptr) => ptr,
+                    Err(e) => {
+                        error!("[Host] cabi_realloc failed for name: {:?}", e);
+                        return;
+                    }
+                },
+                Err(e) => {
+                    error!("[Host] cabi_realloc type error: {:?}", e);
+                    return;
+                }
+            };
+            write_memory(&mut caller, name_ptr, name_bytes);
             
-            // backend (ptr, len)
-            let backend_ptr = str_base + name_bytes.len() as i32;
-            write_i32(&mut caller, retptr + 8, backend_ptr);
-            write_i32(&mut caller, retptr + 12, backend_bytes.len() as i32);
+            // Allocate backend string
+            let realloc = caller.get_export("cabi_realloc").unwrap().into_func().unwrap();
+            let backend_ptr = realloc.typed::<(i32, i32, i32, i32), i32>(&caller).unwrap()
+                .call(&mut caller, (0, 0, 1, backend_bytes.len() as i32)).unwrap();
             write_memory(&mut caller, backend_ptr, backend_bytes);
             
-            // total_memory: u64
+            // Allocate compute_capability string
+            let realloc = caller.get_export("cabi_realloc").unwrap().into_func().unwrap();
+            let cc_ptr = realloc.typed::<(i32, i32, i32, i32), i32>(&caller).unwrap()
+                .call(&mut caller, (0, 0, 1, cc_bytes.len() as i32)).unwrap();
+            write_memory(&mut caller, cc_ptr, cc_bytes);
+            
+            // Write DeviceInfo struct to retptr
+            // name (ptr, len)
+            write_i32(&mut caller, retptr, name_ptr);
+            write_i32(&mut caller, retptr + 4, name_bytes.len() as i32);
+            
+            // backend (ptr, len)
+            write_i32(&mut caller, retptr + 8, backend_ptr);
+            write_i32(&mut caller, retptr + 12, backend_bytes.len() as i32);
+            
+            // total_memory: u64 at offset 16
             write_memory(&mut caller, retptr + 16, &total_memory.to_le_bytes());
             
-            // is_hardware: bool (as i32)
+            // is_hardware: bool at offset 24
             write_i32(&mut caller, retptr + 24, if is_hardware { 1 } else { 0 });
             
-            // compute_capability (ptr, len)
-            let cc_ptr = backend_ptr + backend_bytes.len() as i32;
+            // compute_capability (ptr, len) at offset 28
             write_i32(&mut caller, retptr + 28, cc_ptr);
             write_i32(&mut caller, retptr + 32, cc_bytes.len() as i32);
-            write_memory(&mut caller, cc_ptr, cc_bytes);
         },
     )?;
     
