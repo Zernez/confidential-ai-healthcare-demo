@@ -60,17 +60,25 @@ fn write_memory<T>(caller: &mut Caller<'_, T>, ptr: u32, data: &[u8]) -> bool {
 }
 
 /// Register all wasi:gpu host functions with the linker
+/// 
+/// Functions are registered with versioned module names to match WIT component model:
+/// - wasi:gpu/compute@0.1.0
+/// - wasi:gpu/ml-kernels@0.1.0
 pub fn add_to_linker<T>(
     linker: &mut Linker<T>,
     get_state: impl Fn(&mut T) -> &mut GpuState + Send + Sync + Copy + 'static,
 ) -> anyhow::Result<()> {
+    // Module names for the WIT interface
+    const COMPUTE_MODULE: &str = "wasi:gpu/compute@0.1.0";
+    const ML_KERNELS_MODULE: &str = "wasi:gpu/ml-kernels@0.1.0";
+    
     // ═══════════════════════════════════════════════════════════════════════
-    // wasi:gpu/compute interface
+    // wasi:gpu/compute@0.1.0 interface
     // ═══════════════════════════════════════════════════════════════════════
     
     // get-device-info
     linker.func_wrap(
-        "wasi:gpu/compute",
+        COMPUTE_MODULE,
         "get-device-info",
         move |mut caller: Caller<'_, T>,
               name_ptr: u32, name_len: u32,
@@ -114,7 +122,7 @@ pub fn add_to_linker<T>(
     
     // buffer-create
     linker.func_wrap(
-        "wasi:gpu/compute",
+        COMPUTE_MODULE,
         "buffer-create",
         move |mut caller: Caller<'_, T>, size: u64, usage: u32, out_ptr: u32| -> u32 {
             let state = get_state(caller.data_mut());
@@ -134,7 +142,7 @@ pub fn add_to_linker<T>(
     
     // buffer-write
     linker.func_wrap(
-        "wasi:gpu/compute",
+        COMPUTE_MODULE,
         "buffer-write",
         move |mut caller: Caller<'_, T>, buffer: u32, offset: u64, data_ptr: u32, data_len: u32| -> u32 {
             // Read data from WASM memory first
@@ -157,7 +165,7 @@ pub fn add_to_linker<T>(
     
     // buffer-read
     linker.func_wrap(
-        "wasi:gpu/compute",
+        COMPUTE_MODULE,
         "buffer-read",
         move |mut caller: Caller<'_, T>, buffer: u32, offset: u64, size: u32, out_ptr: u32, out_len_ptr: u32| -> u32 {
             // Read from backend first
@@ -181,7 +189,7 @@ pub fn add_to_linker<T>(
     
     // buffer-copy
     linker.func_wrap(
-        "wasi:gpu/compute",
+        COMPUTE_MODULE,
         "buffer-copy",
         move |mut caller: Caller<'_, T>, src: u32, src_offset: u64, dst: u32, dst_offset: u64, size: u64| -> u32 {
             let state = get_state(caller.data_mut());
@@ -195,7 +203,7 @@ pub fn add_to_linker<T>(
     
     // buffer-destroy
     linker.func_wrap(
-        "wasi:gpu/compute",
+        COMPUTE_MODULE,
         "buffer-destroy",
         move |mut caller: Caller<'_, T>, buffer: u32| -> u32 {
             let state = get_state(caller.data_mut());
@@ -209,7 +217,7 @@ pub fn add_to_linker<T>(
     
     // sync
     linker.func_wrap(
-        "wasi:gpu/compute",
+        COMPUTE_MODULE,
         "sync",
         move |mut caller: Caller<'_, T>| {
             let state = get_state(caller.data_mut());
@@ -218,12 +226,12 @@ pub fn add_to_linker<T>(
     )?;
     
     // ═══════════════════════════════════════════════════════════════════════
-    // wasi:gpu/ml-kernels interface
+    // wasi:gpu/ml-kernels@0.1.0 interface
     // ═══════════════════════════════════════════════════════════════════════
     
     // kernel-bootstrap-sample
     linker.func_wrap(
-        "wasi:gpu/ml-kernels",
+        ML_KERNELS_MODULE,
         "kernel-bootstrap-sample",
         move |mut caller: Caller<'_, T>, params_ptr: u32, output: u32| -> u32 {
             // Read params first
@@ -249,7 +257,7 @@ pub fn add_to_linker<T>(
     
     // kernel-find-split
     linker.func_wrap(
-        "wasi:gpu/ml-kernels",
+        ML_KERNELS_MODULE,
         "kernel-find-split",
         move |mut caller: Caller<'_, T>, 
               params_ptr: u32,
@@ -278,7 +286,7 @@ pub fn add_to_linker<T>(
     
     // kernel-average
     linker.func_wrap(
-        "wasi:gpu/ml-kernels",
+        ML_KERNELS_MODULE,
         "kernel-average",
         move |mut caller: Caller<'_, T>, params_ptr: u32, tree_predictions: u32, output: u32| -> u32 {
             let params_bytes = match read_memory(&mut caller, params_ptr, 8) {
@@ -302,7 +310,7 @@ pub fn add_to_linker<T>(
     
     // kernel-matmul
     linker.func_wrap(
-        "wasi:gpu/ml-kernels",
+        ML_KERNELS_MODULE,
         "kernel-matmul",
         move |mut caller: Caller<'_, T>, params_ptr: u32, a: u32, b: u32, c: u32| -> u32 {
             let params_bytes = match read_memory(&mut caller, params_ptr, 24) {
@@ -331,7 +339,7 @@ pub fn add_to_linker<T>(
     
     // kernel-elementwise
     linker.func_wrap(
-        "wasi:gpu/ml-kernels",
+        ML_KERNELS_MODULE,
         "kernel-elementwise",
         move |mut caller: Caller<'_, T>, params_ptr: u32, input_a: u32, input_b: u32, output: u32| -> u32 {
             let params_bytes = match read_memory(&mut caller, params_ptr, 8) {
@@ -368,7 +376,7 @@ pub fn add_to_linker<T>(
     
     // kernel-reduce
     linker.func_wrap(
-        "wasi:gpu/ml-kernels",
+        ML_KERNELS_MODULE,
         "kernel-reduce",
         move |mut caller: Caller<'_, T>, params_ptr: u32, input: u32, output: u32| -> u32 {
             let params_bytes = match read_memory(&mut caller, params_ptr, 8) {
@@ -401,7 +409,7 @@ pub fn add_to_linker<T>(
     
     // kernel-batch-predict
     linker.func_wrap(
-        "wasi:gpu/ml-kernels",
+        ML_KERNELS_MODULE,
         "kernel-batch-predict",
         move |mut caller: Caller<'_, T>, 
               params_ptr: u32,
@@ -429,6 +437,8 @@ pub fn add_to_linker<T>(
     )?;
     
     info!("[Host] wasi:gpu host functions registered");
+    info!("[Host]   - {} (buffer management, sync)", COMPUTE_MODULE);
+    info!("[Host]   - {} (ML kernels)", ML_KERNELS_MODULE);
     
     Ok(())
 }
