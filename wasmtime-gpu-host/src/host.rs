@@ -138,7 +138,7 @@ pub fn add_to_linker<T>(
         "buffer-write",
         move |mut caller: Caller<'_, T>, buffer: u32, offset: u64, data_ptr: u32, data_len: u32| -> u32 {
             // Read data from WASM memory first
-            let data = match read_memory(&caller, data_ptr, data_len as usize) {
+            let data = match read_memory(&mut caller, data_ptr, data_len as usize) {
                 Some(d) => d,
                 None => return 5, // Invalid params
             };
@@ -227,7 +227,7 @@ pub fn add_to_linker<T>(
         "kernel-bootstrap-sample",
         move |mut caller: Caller<'_, T>, params_ptr: u32, output: u32| -> u32 {
             // Read params first
-            let params_bytes = match read_memory(&caller, params_ptr, 12) {
+            let params_bytes = match read_memory(&mut caller, params_ptr, 12) {
                 Some(b) => b,
                 None => return 5,
             };
@@ -255,7 +255,7 @@ pub fn add_to_linker<T>(
               params_ptr: u32,
               data: u32, labels: u32, indices: u32, thresholds: u32, output_scores: u32| -> u32 {
             
-            let params_bytes = match read_memory(&caller, params_ptr, 16) {
+            let params_bytes = match read_memory(&mut caller, params_ptr, 16) {
                 Some(b) => b,
                 None => return 5,
             };
@@ -281,7 +281,7 @@ pub fn add_to_linker<T>(
         "wasi:gpu/ml-kernels",
         "kernel-average",
         move |mut caller: Caller<'_, T>, params_ptr: u32, tree_predictions: u32, output: u32| -> u32 {
-            let params_bytes = match read_memory(&caller, params_ptr, 8) {
+            let params_bytes = match read_memory(&mut caller, params_ptr, 8) {
                 Some(b) => b,
                 None => return 5,
             };
@@ -305,7 +305,7 @@ pub fn add_to_linker<T>(
         "wasi:gpu/ml-kernels",
         "kernel-matmul",
         move |mut caller: Caller<'_, T>, params_ptr: u32, a: u32, b: u32, c: u32| -> u32 {
-            let params_bytes = match read_memory(&caller, params_ptr, 24) {
+            let params_bytes = match read_memory(&mut caller, params_ptr, 24) {
                 Some(b) => b,
                 None => return 5,
             };
@@ -334,7 +334,7 @@ pub fn add_to_linker<T>(
         "wasi:gpu/ml-kernels",
         "kernel-elementwise",
         move |mut caller: Caller<'_, T>, params_ptr: u32, input_a: u32, input_b: u32, output: u32| -> u32 {
-            let params_bytes = match read_memory(&caller, params_ptr, 8) {
+            let params_bytes = match read_memory(&mut caller, params_ptr, 8) {
                 Some(b) => b,
                 None => return 5,
             };
@@ -371,7 +371,7 @@ pub fn add_to_linker<T>(
         "wasi:gpu/ml-kernels",
         "kernel-reduce",
         move |mut caller: Caller<'_, T>, params_ptr: u32, input: u32, output: u32| -> u32 {
-            let params_bytes = match read_memory(&caller, params_ptr, 8) {
+            let params_bytes = match read_memory(&mut caller, params_ptr, 8) {
                 Some(b) => b,
                 None => return 5,
             };
@@ -407,7 +407,7 @@ pub fn add_to_linker<T>(
               params_ptr: u32,
               samples: u32, tree_nodes: u32, tree_offsets: u32, output: u32| -> u32 {
             
-            let params_bytes = match read_memory(&caller, params_ptr, 16) {
+            let params_bytes = match read_memory(&mut caller, params_ptr, 16) {
                 Some(b) => b,
                 None => return 5,
             };
