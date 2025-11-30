@@ -47,7 +47,7 @@ fn error_discriminant(err: &GpuError) -> u32 {
 }
 
 /// Helper to read bytes from WASM memory
-fn read_memory<T>(caller: &Caller<'_, T>, ptr: u32, len: usize) -> Option<Vec<u8>> {
+fn read_memory<T>(caller: &mut Caller<'_, T>, ptr: u32, len: usize) -> Option<Vec<u8>> {
     let memory = caller.get_export("memory")?.into_memory()?;
     let mut buf = vec![0u8; len];
     memory.read(&*caller, ptr as usize, &mut buf).ok()?;
@@ -312,7 +312,7 @@ pub fn add_to_linker<T: 'static>(
         move |mut caller: Caller<'_, T>, params_ptr: i32, output: i32, retptr: i32| {
             debug!("[Host] kernel-bootstrap-sample");
             
-            let params_bytes = match read_memory(&caller, params_ptr as u32, 12) {
+            let params_bytes = match read_memory(&mut caller, params_ptr as u32, 12) {
                 Some(b) => b,
                 None => {
                     write_u32(&mut caller, retptr as u32, 1);
@@ -331,7 +331,7 @@ pub fn add_to_linker<T: 'static>(
             let retptr = retptr as u32;
             
             match state.backend_mut().kernel_bootstrap_sample(&params, output as u32) {
-                Ok(()) => write_u32(&mut caller, retptr, 0),
+                Ok(()) => { write_u32(&mut caller, retptr, 0); },
                 Err(e) => {
                     write_u32(&mut caller, retptr, 1);
                     write_u32(&mut caller, retptr + 4, error_discriminant(&e));
@@ -350,7 +350,7 @@ pub fn add_to_linker<T: 'static>(
               retptr: i32| {
             debug!("[Host] kernel-find-split");
             
-            let params_bytes = match read_memory(&caller, params_ptr as u32, 16) {
+            let params_bytes = match read_memory(&mut caller, params_ptr as u32, 16) {
                 Some(b) => b,
                 None => {
                     write_u32(&mut caller, retptr as u32, 1);
@@ -370,7 +370,7 @@ pub fn add_to_linker<T: 'static>(
             let retptr = retptr as u32;
             
             match state.backend_mut().kernel_find_split(&params, data as u32, labels as u32, indices as u32, thresholds as u32, output_scores as u32) {
-                Ok(()) => write_u32(&mut caller, retptr, 0),
+                Ok(()) => { write_u32(&mut caller, retptr, 0); },
                 Err(e) => {
                     write_u32(&mut caller, retptr, 1);
                     write_u32(&mut caller, retptr + 4, error_discriminant(&e));
@@ -386,7 +386,7 @@ pub fn add_to_linker<T: 'static>(
         move |mut caller: Caller<'_, T>, params_ptr: i32, tree_predictions: i32, output: i32, retptr: i32| {
             debug!("[Host] kernel-average");
             
-            let params_bytes = match read_memory(&caller, params_ptr as u32, 8) {
+            let params_bytes = match read_memory(&mut caller, params_ptr as u32, 8) {
                 Some(b) => b,
                 None => {
                     write_u32(&mut caller, retptr as u32, 1);
@@ -404,7 +404,7 @@ pub fn add_to_linker<T: 'static>(
             let retptr = retptr as u32;
             
             match state.backend_mut().kernel_average(&params, tree_predictions as u32, output as u32) {
-                Ok(()) => write_u32(&mut caller, retptr, 0),
+                Ok(()) => { write_u32(&mut caller, retptr, 0); },
                 Err(e) => {
                     write_u32(&mut caller, retptr, 1);
                     write_u32(&mut caller, retptr + 4, error_discriminant(&e));
@@ -420,7 +420,7 @@ pub fn add_to_linker<T: 'static>(
         move |mut caller: Caller<'_, T>, params_ptr: i32, a: i32, b: i32, c: i32, retptr: i32| {
             debug!("[Host] kernel-matmul");
             
-            let params_bytes = match read_memory(&caller, params_ptr as u32, 28) {
+            let params_bytes = match read_memory(&mut caller, params_ptr as u32, 28) {
                 Some(b) => b,
                 None => {
                     write_u32(&mut caller, retptr as u32, 1);
@@ -443,7 +443,7 @@ pub fn add_to_linker<T: 'static>(
             let retptr = retptr as u32;
             
             match state.backend_mut().kernel_matmul(&params, a as u32, b as u32, c as u32) {
-                Ok(()) => write_u32(&mut caller, retptr, 0),
+                Ok(()) => { write_u32(&mut caller, retptr, 0); },
                 Err(e) => {
                     write_u32(&mut caller, retptr, 1);
                     write_u32(&mut caller, retptr + 4, error_discriminant(&e));
@@ -459,7 +459,7 @@ pub fn add_to_linker<T: 'static>(
         move |mut caller: Caller<'_, T>, params_ptr: i32, input_a: i32, input_b: i32, output: i32, retptr: i32| {
             debug!("[Host] kernel-elementwise");
             
-            let params_bytes = match read_memory(&caller, params_ptr as u32, 8) {
+            let params_bytes = match read_memory(&mut caller, params_ptr as u32, 8) {
                 Some(b) => b,
                 None => {
                     write_u32(&mut caller, retptr as u32, 1);
@@ -494,7 +494,7 @@ pub fn add_to_linker<T: 'static>(
             let retptr = retptr as u32;
             
             match state.backend_mut().kernel_elementwise(&params, input_a as u32, input_b_opt, output as u32) {
-                Ok(()) => write_u32(&mut caller, retptr, 0),
+                Ok(()) => { write_u32(&mut caller, retptr, 0); },
                 Err(e) => {
                     write_u32(&mut caller, retptr, 1);
                     write_u32(&mut caller, retptr + 4, error_discriminant(&e));
@@ -510,7 +510,7 @@ pub fn add_to_linker<T: 'static>(
         move |mut caller: Caller<'_, T>, params_ptr: i32, input: i32, output: i32, retptr: i32| {
             debug!("[Host] kernel-reduce");
             
-            let params_bytes = match read_memory(&caller, params_ptr as u32, 8) {
+            let params_bytes = match read_memory(&mut caller, params_ptr as u32, 8) {
                 Some(b) => b,
                 None => {
                     write_u32(&mut caller, retptr as u32, 1);
@@ -541,7 +541,7 @@ pub fn add_to_linker<T: 'static>(
             let retptr = retptr as u32;
             
             match state.backend_mut().kernel_reduce(&params, input as u32, output as u32) {
-                Ok(()) => write_u32(&mut caller, retptr, 0),
+                Ok(()) => { write_u32(&mut caller, retptr, 0); },
                 Err(e) => {
                     write_u32(&mut caller, retptr, 1);
                     write_u32(&mut caller, retptr + 4, error_discriminant(&e));
@@ -560,7 +560,7 @@ pub fn add_to_linker<T: 'static>(
               retptr: i32| {
             debug!("[Host] kernel-batch-predict");
             
-            let params_bytes = match read_memory(&caller, params_ptr as u32, 16) {
+            let params_bytes = match read_memory(&mut caller, params_ptr as u32, 16) {
                 Some(b) => b,
                 None => {
                     write_u32(&mut caller, retptr as u32, 1);
@@ -580,7 +580,7 @@ pub fn add_to_linker<T: 'static>(
             let retptr = retptr as u32;
             
             match state.backend_mut().kernel_batch_predict(&params, samples as u32, tree_nodes as u32, tree_offsets as u32, output as u32) {
-                Ok(()) => write_u32(&mut caller, retptr, 0),
+                Ok(()) => { write_u32(&mut caller, retptr, 0); },
                 Err(e) => {
                     write_u32(&mut caller, retptr, 1);
                     write_u32(&mut caller, retptr + 4, error_discriminant(&e));
