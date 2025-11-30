@@ -14,7 +14,7 @@ use tracing::{debug, info, warn, error};
 use serde::{Deserialize, Serialize};
 use std::sync::{Arc, Mutex};
 use wasmtime::{Caller, Linker};
-use tokio::runtime::Handle;
+use tokio::runtime::Runtime;
 
 // Conditional imports based on features
 #[cfg(feature = "attestation-tdx")]
@@ -389,11 +389,14 @@ impl TeeHost {
 
         // Step 5: Get VCEK certificate chain from IMDS (async)
         info!("  Step 5: Fetching VCEK certificate chain from Azure IMDS...");
-        let certs = tokio::task::block_in_place(|| {
-            Handle::current().block_on(async {
+        let certs = {
+            // Create a temporary tokio runtime for the async IMDS call
+            let rt = Runtime::new()
+                .map_err(|e| anyhow::anyhow!("Failed to create tokio runtime: {}", e))?;
+            rt.block_on(async {
                 imds::get_certs().await
             })
-        }).map_err(|e| anyhow::anyhow!("Failed to get VCEK certs from IMDS: {}", e))?;
+        }.map_err(|e| anyhow::anyhow!("Failed to get VCEK certs from IMDS: {}", e))?;
         info!("  ✓ VCEK certificate chain obtained");
         info!("    VCEK cert: {} bytes", certs.vcek.len());
         info!("    Cert chain: {} bytes", certs.amd_chain.len());
