@@ -14,7 +14,7 @@ use wasmtime::*;
 use wasmtime_wasi::preview1::{self, WasiP1Ctx};
 use wasmtime_wasi::WasiCtxBuilder;
 
-use backend::{GpuBackend, GpuError};
+use backend::GpuBackend;
 use host::GpuState;
 
 #[cfg(feature = "cuda")]

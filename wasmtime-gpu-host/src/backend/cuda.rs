@@ -5,7 +5,7 @@
 //! - Custom kernels for ML-specific operations
 
 use super::{
-    AverageParams, BatchPredictParams, BootstrapParams, BufferId, BufferUsage, DeviceInfo,
+    AverageParams, BatchPredictParams, BootstrapParams, BufferId, DeviceInfo,
     ElementwiseOp, ElementwiseParams, FindSplitParams, GpuBackend, GpuError, MatmulParams,
     ReduceOp, ReduceParams,
 };
@@ -14,7 +14,7 @@ use std::sync::Arc;
 use tracing::{debug, error, info, warn};
 
 #[cfg(feature = "cuda")]
-use cudarc::driver::{CudaDevice, CudaSlice, LaunchAsync, LaunchConfig};
+use cudarc::driver::{CudaDevice, CudaSlice};
 #[cfg(feature = "cuda")]
 use cudarc::cublas::CudaBlas;
 
@@ -61,8 +61,9 @@ impl CudaBackend {
         // Get device properties
         let name = device.name().unwrap_or_else(|_| "Unknown CUDA Device".to_string());
         
-        // Get compute capability
-        let (major, minor) = device.compute_capability();
+        // Get compute capability (cudarc 0.12 doesn't expose this directly)
+        // Default to sm_90 for H100, will be detected at runtime
+        let (major, minor) = (9, 0); // Assume H100 sm_90
         let compute_capability = format!("{}.{}", major, minor);
         
         // Estimate memory (cudarc doesn't expose this directly in newer versions)

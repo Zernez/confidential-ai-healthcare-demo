@@ -4,14 +4,13 @@
 //! - `CudaBackend`: Uses CUDA/cuBLAS for NVIDIA GPUs (optimal for H100)
 //! - `WebGpuBackend`: Uses wgpu/Vulkan for cross-platform support
 
-mod cuda;
-mod webgpu;
+pub mod cuda;
+pub mod webgpu;
 
-pub use cuda::*;
-pub use webgpu::*;
+pub use cuda::CudaBackend;
+pub use webgpu::WebGpuBackend;
 
 use anyhow::Result;
-use std::collections::HashMap;
 
 /// Buffer usage flags (matching WIT definition)
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

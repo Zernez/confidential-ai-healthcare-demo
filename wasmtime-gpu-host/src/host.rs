@@ -4,11 +4,11 @@
 //! These bridge between the WASM module and the actual GPU backend.
 
 use crate::backend::{
-    AverageParams, BatchPredictParams, BootstrapParams, BufferId, DeviceInfo,
+    AverageParams, BatchPredictParams, BootstrapParams,
     ElementwiseOp, ElementwiseParams, FindSplitParams, GpuBackend, GpuError,
     MatmulParams, ReduceOp, ReduceParams,
 };
-use tracing::{debug, error, info};
+use tracing::{error, info};
 use wasmtime::{Caller, Linker};
 
 /// GPU State accessible from host functions
@@ -43,10 +43,10 @@ fn error_to_code(err: &GpuError) -> u32 {
 }
 
 /// Helper to read bytes from WASM memory
-fn read_memory<T>(caller: &Caller<'_, T>, ptr: u32, len: usize) -> Option<Vec<u8>> {
+fn read_memory<T>(caller: &mut Caller<'_, T>, ptr: u32, len: usize) -> Option<Vec<u8>> {
     let memory = caller.get_export("memory")?.into_memory()?;
     let mut buf = vec![0u8; len];
-    memory.read(caller, ptr as usize, &mut buf).ok()?;
+    memory.read(&*caller, ptr as usize, &mut buf).ok()?;
     Some(buf)
 }
 
