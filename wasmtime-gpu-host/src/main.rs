@@ -3,6 +3,7 @@
 //! Runs WASM modules that use the wasi:gpu interface.
 //! Automatically selects between CUDA and WebGPU backends.
 
+mod attestation;
 mod backend;
 mod host;
 
@@ -101,6 +102,9 @@ fn main() -> Result<()> {
     
     // Add wasi:gpu functions
     host::add_to_linker(&mut linker, |state: &mut HostState| &mut state.gpu)?;
+    
+    // Add attestation functions
+    attestation::add_to_linker(&mut linker)?;
     
     // Build WASI context
     let workdir = args.workdir.unwrap_or_else(|| std::env::current_dir().unwrap());
