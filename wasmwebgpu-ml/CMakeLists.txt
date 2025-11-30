@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.20)
-project(wasmwebgpu-ml VERSION 0.1.0 LANGUAGES CXX)
+project(wasmwebgpu-ml VERSION 0.2.0 LANGUAGES CXX)
 
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -12,23 +12,24 @@ set(CMAKE_CXX_EXTENSIONS OFF)
 option(BUILD_WASM "Build for WebAssembly with WASI" ON)
 option(BUILD_NATIVE "Build native binary for testing" OFF)
 
-# Include external dependencies
+# Include directories
+include_directories(${CMAKE_SOURCE_DIR}/src)
 include_directories(${CMAKE_SOURCE_DIR}/external)
 
 # ═══════════════════════════════════════════════
-# WASM-Specific Configuration
+# WASM-Specific Configuration (wasi:gpu)
 # ═══════════════════════════════════════════════
 
 if(BUILD_WASM)
     # WASI target
     set(CMAKE_EXECUTABLE_SUFFIX ".wasm")
     
-    # Compiler flags for WASM
+    # Compiler flags for WASM component model
     add_compile_options(
         -O3                          # Optimize for speed
         -flto                        # Link-time optimization
         -fno-exceptions              # No exceptions (reduce size)
-        --target=wasm32-wasi         # WASI target (not wasip2 for better compatibility)
+        --target=wasm32-wasi         # WASI target
     )
     
     # Linker flags for WASM
@@ -36,10 +37,11 @@ if(BUILD_WASM)
         -Wl,--strip-all              # Strip debug symbols
         -Wl,--gc-sections            # Remove unused sections
         -Wl,--lto-O3                 # LTO optimization
-        # Default exec-model is "command" which calls main()
+        # Allow undefined symbols for wasi:gpu imports
+        -Wl,--allow-undefined
     )
     
-    message(STATUS "Building for WASM target (wasm32-wasi)")
+    message(STATUS "Building for WASM target with wasi:gpu interface")
 endif()
 
 # ═══════════════════════════════════════════════
@@ -57,7 +59,8 @@ set(HEADERS
     src/dataset.hpp
     src/random_forest.hpp
     src/gpu_executor.hpp
-    src/wasi_webgpu_wrapper.hpp
+    src/wasi_gpu.h
+    src/attestation.hpp
 )
 
 # ═══════════════════════════════════════════════
@@ -68,8 +71,7 @@ add_executable(wasmwebgpu-ml-benchmark ${SOURCES} ${HEADERS})
 
 # Link libraries
 target_link_libraries(wasmwebgpu-ml-benchmark
-    # Math library
-    m
+    m  # Math library
 )
 
 # ═══════════════════════════════════════════════
@@ -80,8 +82,8 @@ install(TARGETS wasmwebgpu-ml-benchmark
     RUNTIME DESTINATION bin
 )
 
-# Copy shaders
-install(DIRECTORY ${CMAKE_SOURCE_DIR}/shaders
+# Copy WIT files
+install(DIRECTORY ${CMAKE_SOURCE_DIR}/wit
     DESTINATION share/wasmwebgpu-ml
 )
 
@@ -91,12 +93,12 @@ install(DIRECTORY ${CMAKE_SOURCE_DIR}/shaders
 
 message(STATUS "")
 message(STATUS "═══════════════════════════════════════")
-message(STATUS "  wasmwebgpu-ml Configuration")
+message(STATUS "  wasmwebgpu-ml Configuration (v${PROJECT_VERSION})")
 message(STATUS "═══════════════════════════════════════")
 message(STATUS "  C++ Standard: ${CMAKE_CXX_STANDARD}")
 message(STATUS "  Build Type: ${CMAKE_BUILD_TYPE}")
 message(STATUS "  WASM Build: ${BUILD_WASM}")
-message(STATUS "  Native Build: ${BUILD_NATIVE}")
+message(STATUS "  GPU Interface: wasi:gpu (host-provided)")
 if(BUILD_WASM)
     message(STATUS "  Compiler: ${CMAKE_CXX_COMPILER}")
     message(STATUS "  Target: wasm32-wasi")

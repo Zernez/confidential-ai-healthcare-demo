@@ -1,0 +1,46 @@
+[package]
+name = "wasmtime-gpu-host"
+version = "0.1.0"
+edition = "2021"
+description = "Wasmtime host runtime with wasi:gpu support (WebGPU + CUDA backends)"
+authors = ["Fernando Giorgetti"]
+license = "Apache-2.0"
+
+[dependencies]
+# Wasmtime runtime
+wasmtime = { version = "27", features = ["component-model"] }
+wasmtime-wasi = "27"
+
+# GPU backends
+wgpu = { version = "23.0", features = ["vulkan-portability"] }
+
+# CUDA bindings (optional, for H100 support)
+# cudarc provides cuBLAS, cuRAND, and raw CUDA driver API
+cudarc = { version = "0.12", features = ["cublas", "curand", "nvrtc"], optional = true }
+
+# Async runtime
+tokio = { version = "1", features = ["full"] }
+pollster = "0.3"
+
+# Utilities
+anyhow = "1.0"
+thiserror = "2.0"
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+bytemuck = { version = "1.14", features = ["derive"] }
+
+# CLI
+clap = { version = "4", features = ["derive"] }
+
+[features]
+default = ["cuda"]
+cuda = ["dep:cudarc"]
+webgpu-only = []
+
+[[bin]]
+name = "wasmtime-gpu-host"
+path = "src/main.rs"
+
+[profile.release]
+opt-level = 3
+lto = true

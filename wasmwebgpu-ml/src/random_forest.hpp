@@ -1,9 +1,9 @@
 /**
  * @file random_forest.hpp
- * @brief RandomForest implementation with GPU acceleration
+ * @brief RandomForest implementation with GPU acceleration via wasi:gpu
  * 
  * Implements RandomForest regressor with decision trees using bagging.
- * Supports both CPU and GPU training/inference via WebGPU.
+ * Supports both CPU and GPU training/inference via wasi:gpu host functions.
  */
 
 #ifndef RANDOM_FOREST_HPP
@@ -17,8 +17,10 @@
 
 namespace ml {
 
-// Forward declaration
+// Forward declarations
 class GpuExecutor;
+class GpuTrainer;
+class GpuPredictor;
 
 /**
  * @enum NodeType
@@ -79,17 +81,22 @@ public:
     
     /**
      * @brief Train tree on CPU
-     * @param data Flat array of features (row-major)
-     * @param labels Target values
-     * @param n_samples Number of samples
-     * @param n_features Number of features
-     * @param rng Random number generator
      */
     void train_cpu(const std::vector<float>& data,
                    const std::vector<float>& labels,
                    size_t n_samples,
                    size_t n_features,
                    std::mt19937& rng);
+    
+    /**
+     * @brief Train tree with GPU acceleration via wasi:gpu
+     */
+    void train_with_gpu(const std::vector<float>& data,
+                        const std::vector<float>& labels,
+                        const std::vector<uint32_t>& bootstrap_indices,
+                        size_t n_features,
+                        GpuTrainer& gpu_trainer,
+                        std::mt19937& rng);
     
     /**
      * @brief Predict for a single sample
@@ -113,7 +120,7 @@ private:
     /**
      * @brief Recursively build tree (CPU version)
      */
-    std::unique_ptr<TreeNode> build_tree(
+    std::unique_ptr<TreeNode> build_tree_cpu(
         const std::vector<float>& data,
         const std::vector<float>& labels,
         const std::vector<size_t>& indices,
@@ -123,7 +130,20 @@ private:
     );
     
     /**
-     * @brief Find best split for a node
+     * @brief Recursively build tree with GPU split finding
+     */
+    std::unique_ptr<TreeNode> build_tree_gpu(
+        const std::vector<float>& data,
+        const std::vector<float>& labels,
+        const std::vector<size_t>& indices,
+        size_t n_features,
+        size_t depth,
+        GpuTrainer& gpu_trainer,
+        std::mt19937& rng
+    );
+    
+    /**
+     * @brief Find best split for a node (CPU)
      */
     struct SplitInfo {
         size_t feature_idx;
@@ -131,11 +151,23 @@ private:
         float score;
     };
     
-    SplitInfo find_best_split(
+    SplitInfo find_best_split_cpu(
         const std::vector<float>& data,
         const std::vector<float>& labels,
         const std::vector<size_t>& indices,
         size_t n_features,
+        std::mt19937& rng
+    );
+    
+    /**
+     * @brief Find best split using GPU
+     */
+    SplitInfo find_best_split_gpu(
+        const std::vector<float>& data,
+        const std::vector<float>& labels,
+        const std::vector<size_t>& indices,
+        size_t n_features,
+        GpuTrainer& gpu_trainer,
         std::mt19937& rng
     );
     
@@ -179,35 +211,26 @@ public:
     void train_cpu(const Dataset& dataset);
     
     /**
-     * @brief Train forest with GPU acceleration
+     * @brief Train forest with GPU acceleration via wasi:gpu
      * @param dataset Training dataset
-     * @param gpu GPU executor
+     * @param gpu_trainer GPU trainer with pre-uploaded data
      */
-    void train_gpu(const Dataset& dataset, GpuExecutor& gpu);
+    void train_with_gpu(const Dataset& dataset, GpuTrainer& gpu_trainer);
     
     /**
      * @brief Predict on CPU
-     * @param data Flat array of features
-     * @param n_samples Number of samples
-     * @param n_features Number of features
-     * @return Predictions for each sample
      */
     std::vector<float> predict_cpu(const std::vector<float>& data,
                                     size_t n_samples,
                                     size_t n_features) const;
     
     /**
-     * @brief Predict with GPU acceleration
-     * @param data Flat array of features
-     * @param n_samples Number of samples
-     * @param n_features Number of features
-     * @param gpu GPU executor
-     * @return Predictions for each sample
+     * @brief Predict with GPU acceleration via wasi:gpu
      */
-    std::vector<float> predict_gpu(const std::vector<float>& data,
-                                    size_t n_samples,
-                                    size_t n_features,
-                                    GpuExecutor& gpu);
+    std::vector<float> predict_with_gpu(const std::vector<float>& data,
+                                         size_t n_samples,
+                                         size_t n_features,
+                                         GpuPredictor& predictor);
     
     /**
      * @brief Get tree predictions for GPU processing

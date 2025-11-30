@@ -1,7 +1,8 @@
 [package]
 name = "wasm-ml"
-version = "0.1.0"
+version = "0.2.0"
 edition = "2021"
+description = "WASM ML module with portable GPU acceleration via wasi:gpu"
 
 [lib]
 crate-type = ["cdylib", "rlib"]
@@ -11,16 +12,15 @@ name = "wasm-ml-benchmark"
 path = "src/main.rs"
 
 [dependencies]
-# Futures for wasm-bindgen
-wasm-bindgen-futures = "0.4"
-# WASI bindings
-wit-bindgen = "0.30"
+# WIT bindings generation
+wit-bindgen = "0.36"
 
 # Serialization
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
 bincode = "1.3"
 
+# Random number generation (for CPU fallback and seeding)
 rand = "0.8"
 rand_xoshiro = "0.6"
 
@@ -30,15 +30,11 @@ ndarray = { version = "0.15", features = ["serde"] }
 # CSV reading
 csv = "1.3"
 
-# WebGPU support - using wgpu for GPU compute
-wgpu = { version = "23.0", features = ["wgsl"] }
-pollster = "0.3"
+# Byte casting for GPU buffers
 bytemuck = { version = "1.14", features = ["derive"] }
-futures-intrusive = "0.5"
 
 [target.'cfg(target_arch = "wasm32")'.dependencies]
-wasm-bindgen = "0.2"
-console_error_panic_hook = "0.1"
+# WASM-specific dependencies - minimal for component model
 getrandom = { version = "0.2", features = ["js"] }
 
 [profile.release]
@@ -49,3 +45,14 @@ strip = true
 
 [profile.dev]
 opt-level = 1
+
+# Build as WASM component
+[package.metadata.component]
+package = "wasm-ml:ml-module"
+
+[package.metadata.component.target]
+path = "wit"
+world = "ml-compute"
+
+[package.metadata.component.target.dependencies]
+"wasi:gpu" = { path = "wit" }

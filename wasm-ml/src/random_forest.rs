@@ -3,7 +3,7 @@
 //! This implementation uses bagging (bootstrap aggregating) to train
 //! multiple decision trees and averages their predictions.
 //! 
-//! Now includes GPU-accelerated training via WebGPU compute shaders.
+//! GPU acceleration is provided via wasi:gpu host functions.
 
 use serde::{Deserialize, Serialize};
 use rand::Rng;
@@ -11,7 +11,7 @@ use rand_xoshiro::Xoshiro256PlusPlus;
 use rand::SeedableRng;
 
 use crate::data::Dataset;
-use crate::gpu_training::GpuTrainer;
+use crate::gpu_wasi::GpuTrainer;
 
 /// A single decision tree node
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -58,15 +58,15 @@ impl DecisionTree {
         }
     }
     
-    /// Train the tree on a dataset
+    /// Train the tree on CPU
     pub fn train(&mut self, data: &[f32], labels: &[f32], n_features: usize, rng: &mut impl Rng) {
         let n_samples = labels.len();
         let indices: Vec<usize> = (0..n_samples).collect();
-        self.root = self.build_tree(data, labels, &indices, n_features, 0, rng);
+        self.root = self.build_tree_cpu(data, labels, &indices, n_features, 0, rng);
     }
     
     /// Train tree with GPU-accelerated split finding
-    pub async fn train_gpu(
+    pub fn train_with_gpu(
         &mut self,
         data: &[f32],
         labels: &[f32],
@@ -76,12 +76,11 @@ impl DecisionTree {
         rng: &mut impl Rng,
     ) -> Result<(), String> {
         let indices_usize: Vec<usize> = indices.iter().map(|&x| x as usize).collect();
-        self.root = self.build_tree_gpu(data, labels, &indices_usize, n_features, 0, gpu_trainer, rng)
-            .await?;
+        self.root = self.build_tree_gpu(data, labels, &indices_usize, n_features, 0, gpu_trainer, rng)?;
         Ok(())
     }
     
-    fn build_tree(
+    fn build_tree_cpu(
         &self,
         data: &[f32],
         labels: &[f32],
@@ -97,7 +96,7 @@ impl DecisionTree {
         }
         
         // Find best split
-        let (best_feature, best_threshold, best_score) = self.find_best_split(
+        let (best_feature, best_threshold, best_score) = self.find_best_split_cpu(
             data,
             labels,
             indices,
@@ -121,8 +120,8 @@ impl DecisionTree {
         );
         
         // Recursively build subtrees
-    let left = Box::new(self.build_tree(data, labels, &left_indices, n_features, depth + 1, rng));
-    let right = Box::new(self.build_tree(data, labels, &right_indices, n_features, depth + 1, rng));
+        let left = Box::new(self.build_tree_cpu(data, labels, &left_indices, n_features, depth + 1, rng));
+        let right = Box::new(self.build_tree_cpu(data, labels, &right_indices, n_features, depth + 1, rng));
 
         TreeNode::Internal {
             feature_idx: best_feature,
@@ -132,7 +131,7 @@ impl DecisionTree {
         }
     }
     
-    async fn build_tree_gpu(
+    fn build_tree_gpu(
         &self,
         data: &[f32],
         labels: &[f32],
@@ -142,90 +141,56 @@ impl DecisionTree {
         gpu_trainer: &GpuTrainer,
         rng: &mut impl Rng,
     ) -> Result<TreeNode, String> {
-        // Iterative async tree construction
-        use std::collections::VecDeque;
-        struct NodeTask {
-            indices: Vec<usize>,
-            depth: usize,
-            parent: Option<*mut TreeNode>,
-            is_left: bool,
+        // Base cases: max depth or too few samples
+        if depth >= self.max_depth || indices.len() < 2 {
+            let mean = indices.iter().map(|&i| labels[i]).sum::<f32>() / indices.len() as f32;
+            return Ok(TreeNode::Leaf { value: mean });
         }
-        let mut queue = VecDeque::new();
-        let mut root: Option<Box<TreeNode>> = None;
-        queue.push_back(NodeTask {
-            indices: indices.to_vec(),
-            depth,
-            parent: None,
-            is_left: false,
-        });
-        while let Some(task) = queue.pop_front() {
-            let NodeTask { indices, depth, parent, is_left } = task;
-            let node = if depth >= self.max_depth || indices.len() < 2 {
-                let mean = indices.iter().map(|&i| labels[i]).sum::<f32>() / indices.len() as f32;
-                Box::new(TreeNode::Leaf { value: mean })
-            } else {
-                let (best_feature, best_threshold, best_score) = self.find_best_split_gpu(
-                    data,
-                    labels,
-                    &indices,
-                    n_features,
-                    gpu_trainer,
-                    rng,
-                ).await?;
-                if best_score.is_infinite() {
-                    let mean = indices.iter().map(|&i| labels[i]).sum::<f32>() / indices.len() as f32;
-                    Box::new(TreeNode::Leaf { value: mean })
-                } else {
-                    let (left_indices, right_indices) = self.split_data(
-                        data,
-                        &indices,
-                        n_features,
-                        best_feature,
-                        best_threshold,
-                    );
-                    let mut internal = TreeNode::Internal {
-                        feature_idx: best_feature,
-                        threshold: best_threshold,
-                        left: Box::new(TreeNode::Leaf { value: 0.0 }), // placeholder
-                        right: Box::new(TreeNode::Leaf { value: 0.0 }), // placeholder
-                    };
-                    let internal_ptr: *mut TreeNode = &mut internal;
-                    queue.push_back(NodeTask {
-                        indices: left_indices,
-                        depth: depth + 1,
-                        parent: Some(internal_ptr),
-                        is_left: true,
-                    });
-                    queue.push_back(NodeTask {
-                        indices: right_indices,
-                        depth: depth + 1,
-                        parent: Some(internal_ptr),
-                        is_left: false,
-                    });
-                    Box::new(internal)
-                }
-            };
-            if let Some(parent_ptr) = parent {
-                unsafe {
-                    match parent_ptr.as_mut().unwrap() {
-                        TreeNode::Internal { left, right, .. } => {
-                            if is_left {
-                                *left = node;
-                            } else {
-                                *right = node;
-                            }
-                        }
-                        _ => {}
-                    }
-                }
-            } else {
-                root = Some(node);
-            }
+        
+        // Find best split using GPU
+        let (best_feature, best_threshold, best_score) = self.find_best_split_gpu(
+            data,
+            labels,
+            indices,
+            n_features,
+            gpu_trainer,
+            rng,
+        )?;
+        
+        // If no good split found, create leaf
+        if best_score.is_infinite() {
+            let mean = indices.iter().map(|&i| labels[i]).sum::<f32>() / indices.len() as f32;
+            return Ok(TreeNode::Leaf { value: mean });
         }
-        Ok(*root.unwrap())
+        
+        // Split data
+        let (left_indices, right_indices) = self.split_data(
+            data,
+            indices,
+            n_features,
+            best_feature,
+            best_threshold,
+        );
+        
+        // Check for degenerate splits
+        if left_indices.is_empty() || right_indices.is_empty() {
+            let mean = indices.iter().map(|&i| labels[i]).sum::<f32>() / indices.len() as f32;
+            return Ok(TreeNode::Leaf { value: mean });
+        }
+        
+        // Recursively build subtrees
+        let left = Box::new(self.build_tree_gpu(data, labels, &left_indices, n_features, depth + 1, gpu_trainer, rng)?);
+        let right = Box::new(self.build_tree_gpu(data, labels, &right_indices, n_features, depth + 1, gpu_trainer, rng)?);
+
+        Ok(TreeNode::Internal {
+            feature_idx: best_feature,
+            threshold: best_threshold,
+            left,
+            right,
+        })
     }
     
-    async fn find_best_split_gpu(
+    fn find_best_split_gpu(
         &self,
         data: &[f32],
         labels: &[f32],
@@ -250,14 +215,34 @@ impl DecisionTree {
         
         // Try each feature
         for &feature_idx in features.iter().take(n_features_to_try) {
+            // Extract feature values and compute candidate thresholds
+            let mut feature_values: Vec<f32> = indices
+                .iter()
+                .map(|&idx| data[idx * n_features + feature_idx])
+                .collect();
+            feature_values.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
+            feature_values.dedup();
+            
+            if feature_values.len() < 2 {
+                continue;
+            }
+            
+            // Compute thresholds (midpoints)
+            let thresholds: Vec<f32> = feature_values
+                .windows(2)
+                .map(|w| (w[0] + w[1]) / 2.0)
+                .collect();
+            
+            if thresholds.is_empty() {
+                continue;
+            }
+            
             // Use GPU to find best split for this feature
             let (threshold, score) = gpu_trainer.find_best_split(
-                data,
-                labels,
                 &indices_u32,
-                n_features,
                 feature_idx,
-            ).await?;
+                &thresholds,
+            )?;
             
             if score < best_score {
                 best_score = score;
@@ -269,7 +254,7 @@ impl DecisionTree {
         Ok((best_feature, best_threshold, best_score))
     }
     
-    fn find_best_split(
+    fn find_best_split_cpu(
         &self,
         data: &[f32],
         labels: &[f32],
@@ -285,7 +270,6 @@ impl DecisionTree {
         let n_features_to_try = (n_features as f32).sqrt().ceil() as usize;
         let mut features: Vec<usize> = (0..n_features).collect();
         
-        // Shuffle and select random features
         use rand::seq::SliceRandom;
         features.shuffle(rng);
         
@@ -295,7 +279,7 @@ impl DecisionTree {
                 .iter()
                 .map(|&i| data[i * n_features + feature_idx])
                 .collect();
-            values.sort_by(|a, b| a.partial_cmp(b).unwrap());
+            values.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
             values.dedup();
             
             // Try different thresholds
@@ -406,7 +390,6 @@ impl RandomForest {
             
             self.trees.push(tree);
             
-            // Progress indication
             if (i + 1) % 10 == 0 {
                 eprintln!("Trained {}/{} trees (CPU)", i + 1, self.n_estimators);
             }
@@ -416,17 +399,16 @@ impl RandomForest {
     }
     
     /// Train the forest with GPU acceleration
-    pub async fn train_gpu(&mut self, dataset: &Dataset, gpu_trainer: &GpuTrainer) -> Result<(), String> {
+    pub fn train_with_gpu(&mut self, dataset: &Dataset, gpu_trainer: &GpuTrainer) -> Result<(), String> {
         let mut rng = Xoshiro256PlusPlus::from_entropy();
         
         for i in 0..self.n_estimators {
             // Bootstrap sample on GPU
-            let seed = rng.gen();
-            let bootstrap_indices = gpu_trainer.bootstrap_sample(dataset.n_samples, seed)
-                .await
-                .map_err(|e| format!("GPU bootstrap failed: {}", e))?;
+            let seed: u32 = rng.gen();
+            let bootstrap_indices = gpu_trainer.bootstrap_sample(dataset.n_samples, seed)?;
             
-            // Extract bootstrapped data
+            // Extract bootstrapped data for tree building
+            // Note: The full data is already on GPU, we just need to track indices
             let mut sampled_data = Vec::with_capacity(dataset.n_samples * dataset.n_features);
             let mut sampled_labels = Vec::with_capacity(dataset.n_samples);
             
@@ -437,18 +419,17 @@ impl RandomForest {
             
             // Train tree with GPU-accelerated split finding
             let mut tree = DecisionTree::new(self.max_depth);
-            tree.train_gpu(
+            tree.train_with_gpu(
                 &sampled_data,
                 &sampled_labels,
                 &bootstrap_indices,
                 dataset.n_features,
                 gpu_trainer,
                 &mut rng,
-            ).await?;
+            )?;
             
             self.trees.push(tree);
             
-            // Progress indication
             if (i + 1) % 10 == 0 {
                 eprintln!("Trained {}/{} trees (GPU)", i + 1, self.n_estimators);
             }
@@ -457,7 +438,7 @@ impl RandomForest {
         Ok(())
     }
     
-    /// Predict on CPU (fallback)
+    /// Predict on CPU
     pub fn predict_cpu(
         &self,
         data: &[f32],
@@ -481,7 +462,7 @@ impl RandomForest {
         Ok(predictions)
     }
     
-    /// Get tree predictions for GPU processing
+    /// Get predictions from each tree for a sample
     pub fn get_tree_predictions(&self, sample: &[f32]) -> Vec<f32> {
         self.trees.iter().map(|tree| tree.predict(sample)).collect()
     }
