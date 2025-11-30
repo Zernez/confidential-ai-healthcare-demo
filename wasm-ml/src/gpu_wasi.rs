@@ -5,21 +5,24 @@
 //!
 //! The WASM module is completely agnostic to the underlying GPU backend.
 
-
-use bytemuck::{Pod, Zeroable, cast_slice};
-// Import types and functions from generated WIT bindings
-use crate::wasi::gpu::compute::{DeviceInfo, BufferUsage, BufferId, get_device_info, buffer_create, buffer_write, buffer_read, buffer_destroy, sync};
-use crate::wasi::gpu::ml_kernels::{BootstrapParams, kernel_bootstrap_sample, FindSplitParams, kernel_find_split, AverageParams, kernel_average, MatmulParams, kernel_matmul};
+use bytemuck::cast_slice;
 
 // Generate bindings from WIT
+// This creates the `wasi::gpu::compute` and `wasi::gpu::ml_kernels` modules
 wit_bindgen::generate!({
     world: "ml-compute",
     path: "wit",
 });
 
 // Re-export generated types for convenience
-pub use crate::wasi::gpu::compute::*;
-pub use crate::wasi::gpu::ml_kernels::*;
+pub use wasi::gpu::compute::{
+    DeviceInfo, BufferUsage, BufferId, GpuError,
+    get_device_info, buffer_create, buffer_write, buffer_read, buffer_destroy, sync,
+};
+pub use wasi::gpu::ml_kernels::{
+    BootstrapParams, FindSplitParams, AverageParams, MatmulParams,
+    kernel_bootstrap_sample, kernel_find_split, kernel_average, kernel_matmul,
+};
 
 /// High-level GPU executor wrapping wasi:gpu calls
 pub struct GpuExecutor {
@@ -129,7 +132,7 @@ impl GpuTrainer {
             data_size,
             BufferUsage::STORAGE | BufferUsage::COPY_DST,
         )?;
-        self.executor.write_buffer(data_buffer, 0, bytemuck::cast_slice(data))?;
+        self.executor.write_buffer(data_buffer, 0, cast_slice(data))?;
         self.data_buffer = Some(data_buffer);
         
         // Create and upload labels buffer
@@ -138,7 +141,7 @@ impl GpuTrainer {
             labels_size,
             BufferUsage::STORAGE | BufferUsage::COPY_DST,
         )?;
-        self.executor.write_buffer(labels_buffer, 0, bytemuck::cast_slice(labels))?;
+        self.executor.write_buffer(labels_buffer, 0, cast_slice(labels))?;
         self.labels_buffer = Some(labels_buffer);
         
         eprintln!("[GpuTrainer] Uploaded {} samples x {} features to GPU", n_samples, n_features);
@@ -167,7 +170,7 @@ impl GpuTrainer {
         
         // Read results
         let result_bytes = self.executor.read_buffer(output_buffer, 0, output_size as u32)?;
-        let indices: Vec<u32> = bytemuck::cast_slice(&result_bytes).to_vec();
+        let indices: Vec<u32> = cast_slice(&result_bytes).to_vec();
         
         // Cleanup
         self.executor.destroy_buffer(output_buffer)?;
@@ -195,7 +198,7 @@ impl GpuTrainer {
             indices_size,
             BufferUsage::STORAGE | BufferUsage::COPY_DST,
         )?;
-        self.executor.write_buffer(indices_buffer, 0, bytemuck::cast_slice(indices))?;
+        self.executor.write_buffer(indices_buffer, 0, cast_slice(indices))?;
         
         // Create thresholds buffer
         let thresholds_size = (n_thresholds * std::mem::size_of::<f32>()) as u64;
@@ -203,7 +206,7 @@ impl GpuTrainer {
             thresholds_size,
             BufferUsage::STORAGE | BufferUsage::COPY_DST,
         )?;
-        self.executor.write_buffer(thresholds_buffer, 0, bytemuck::cast_slice(thresholds))?;
+        self.executor.write_buffer(thresholds_buffer, 0, cast_slice(thresholds))?;
         
         // Create output scores buffer
         let scores_size = (n_thresholds * std::mem::size_of::<f32>()) as u64;
@@ -231,7 +234,7 @@ impl GpuTrainer {
         
         // Read scores
         let scores_bytes = self.executor.read_buffer(scores_buffer, 0, scores_size as u32)?;
-        let scores: Vec<f32> = bytemuck::cast_slice(&scores_bytes).to_vec();
+        let scores: Vec<f32> = cast_slice(&scores_bytes).to_vec();
         
         // Find best threshold
         let (best_idx, &best_score) = scores
@@ -292,7 +295,7 @@ impl GpuPredictor {
             input_size,
             BufferUsage::STORAGE | BufferUsage::COPY_DST,
         )?;
-        self.executor.write_buffer(input_buffer, 0, bytemuck::cast_slice(tree_predictions))?;
+        self.executor.write_buffer(input_buffer, 0, cast_slice(tree_predictions))?;
         
         // Create output buffer
         let output_size = (n_samples * std::mem::size_of::<f32>()) as u64;
@@ -312,7 +315,7 @@ impl GpuPredictor {
         
         // Read results
         let result_bytes = self.executor.read_buffer(output_buffer, 0, output_size as u32)?;
-        let predictions: Vec<f32> = bytemuck::cast_slice(&result_bytes).to_vec();
+        let predictions: Vec<f32> = cast_slice(&result_bytes).to_vec();
         
         // Cleanup
         self.executor.destroy_buffer(input_buffer)?;
@@ -339,13 +342,13 @@ impl GpuPredictor {
             a_size,
             BufferUsage::STORAGE | BufferUsage::COPY_DST,
         )?;
-        self.executor.write_buffer(a_buffer, 0, bytemuck::cast_slice(a))?;
+        self.executor.write_buffer(a_buffer, 0, cast_slice(a))?;
         
         let b_buffer = self.executor.create_buffer(
             b_size,
             BufferUsage::STORAGE | BufferUsage::COPY_DST,
         )?;
-        self.executor.write_buffer(b_buffer, 0, bytemuck::cast_slice(b))?;
+        self.executor.write_buffer(b_buffer, 0, cast_slice(b))?;
         
         let c_buffer = self.executor.create_buffer(
             c_size,
@@ -371,7 +374,7 @@ impl GpuPredictor {
         
         // Read results
         let result_bytes = self.executor.read_buffer(c_buffer, 0, c_size as u32)?;
-        let c: Vec<f32> = bytemuck::cast_slice(&result_bytes).to_vec();
+        let c: Vec<f32> = cast_slice(&result_bytes).to_vec();
         
         // Cleanup
         self.executor.destroy_buffer(a_buffer)?;

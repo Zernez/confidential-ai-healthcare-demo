@@ -27,21 +27,15 @@
 #![allow(unused)]
 
 pub mod random_forest;
-pub mod gpu_wasi;  // NEW: wasi:gpu based GPU access
+pub mod gpu_wasi;
 pub mod data;
-
-// Keep old modules for reference/fallback but mark as deprecated
-#[deprecated(note = "Use gpu_wasi instead - this uses wgpu directly which doesn't work in WASM component model")]
-pub mod gpu_compute;
-#[deprecated(note = "Use gpu_wasi instead")]
-pub mod gpu_training;
 
 #[cfg(target_arch = "wasm32")]
 pub mod attestation;
 
 use random_forest::RandomForest;
 use data::Dataset;
-use gpu_wasi::{GpuTrainer, GpuPredictor};
+use gpu_wasi::{GpuTrainer, GpuPredictor, GpuExecutor};
 
 /// GPU-accelerated training entry point
 /// 
@@ -174,7 +168,7 @@ pub fn predict_cpu(
 
 /// Get GPU device information
 pub fn get_gpu_info() -> Result<String, String> {
-    let executor = gpu_wasi::GpuExecutor::new()?;
+    let executor = GpuExecutor::new()?;
     Ok(format!(
         "Device: {}, Backend: {}, Hardware: {}",
         executor.device_name(),
