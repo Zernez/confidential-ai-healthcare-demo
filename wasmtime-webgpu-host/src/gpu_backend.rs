@@ -185,7 +185,7 @@ impl GpuBackend {
             ..Default::default()
         });
         
-        let vulkan_adapters: Vec<_> = instance_vulkan.enumerate_adapters(Backends::VULKAN).collect();
+        let vulkan_adapters = instance_vulkan.enumerate_adapters(Backends::VULKAN);
         info!("  Vulkan adapters found: {}", vulkan_adapters.len());
         
         for (i, adapter) in vulkan_adapters.iter().enumerate() {
