@@ -14,7 +14,7 @@ use tracing::{debug, info, warn, error};
 use serde::{Deserialize, Serialize};
 use std::sync::{Arc, Mutex};
 use wasmtime::{Caller, Linker};
-use tokio::runtime::Runtime;
+use tokio::runtime::{Runtime, Handle};
 
 // Conditional imports based on features
 #[cfg(feature = "attestation-tdx")]
