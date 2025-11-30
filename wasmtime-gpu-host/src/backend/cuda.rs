@@ -295,6 +295,18 @@ impl GpuBackend for CudaBackend {
             .map(|c| f32::from_le_bytes([c[0], c[1], c[2], c[3]]))
             .collect();
         
+        debug!("[CUDA] find_split: data_f32.len()={}, labels_f32.len()={}, indices_u32.len()={}",
+               data_f32.len(), labels_f32.len(), indices_u32.len());
+        
+        // Validate indices are within bounds
+        let max_valid_idx = params.n_samples - 1;
+        for (i, &idx) in indices_u32.iter().enumerate() {
+            if idx > max_valid_idx {
+                warn!("[CUDA] find_split: index {} at position {} exceeds max_valid_idx {}, clamping",
+                      idx, i, max_valid_idx);
+            }
+        }
+        
         // Compute MSE for each threshold
         let mut scores = Vec::with_capacity(params.n_thresholds as usize);
         
@@ -304,10 +316,18 @@ impl GpuBackend for CudaBackend {
             let mut left_count = 0u32;
             let mut right_count = 0u32;
             
-            // First pass: compute means
+            // First pass: compute means (with bounds checking)
             for &idx in &indices_u32 {
-                let feature_val = data_f32[(idx as usize) * (params.n_features as usize) + (params.feature_idx as usize)];
-                let label = labels_f32[idx as usize];
+                // Clamp index to valid range
+                let safe_idx = (idx as usize).min((params.n_samples - 1) as usize);
+                let data_idx = safe_idx * (params.n_features as usize) + (params.feature_idx as usize);
+                
+                if data_idx >= data_f32.len() {
+                    continue; // Skip invalid indices
+                }
+                
+                let feature_val = data_f32[data_idx];
+                let label = labels_f32[safe_idx.min(labels_f32.len() - 1)];
                 
                 if feature_val <= threshold {
                     left_sum += label;
@@ -326,11 +346,18 @@ impl GpuBackend for CudaBackend {
             let left_mean = left_sum / left_count as f32;
             let right_mean = right_sum / right_count as f32;
             
-            // Second pass: compute MSE
+            // Second pass: compute MSE (with bounds checking)
             let mut mse = 0.0f32;
             for &idx in &indices_u32 {
-                let feature_val = data_f32[(idx as usize) * (params.n_features as usize) + (params.feature_idx as usize)];
-                let label = labels_f32[idx as usize];
+                let safe_idx = (idx as usize).min((params.n_samples - 1) as usize);
+                let data_idx = safe_idx * (params.n_features as usize) + (params.feature_idx as usize);
+                
+                if data_idx >= data_f32.len() {
+                    continue;
+                }
+                
+                let feature_val = data_f32[data_idx];
+                let label = labels_f32[safe_idx.min(labels_f32.len() - 1)];
                 
                 let mean = if feature_val <= threshold { left_mean } else { right_mean };
                 let diff = label - mean;
