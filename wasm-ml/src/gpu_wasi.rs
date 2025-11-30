@@ -165,7 +165,7 @@ impl GpuTrainer {
             max_index: self.n_samples as u32,
         };
         
-        kernel_bootstrap_sample(&params, output_buffer)
+        kernel_bootstrap_sample(params, output_buffer)
             .map_err(|e| format!("Bootstrap kernel failed: {:?}", e))?;
         
         // Read results
@@ -224,7 +224,7 @@ impl GpuTrainer {
         };
         
         kernel_find_split(
-            &params,
+            params,
             data_buffer,
             labels_buffer,
             indices_buffer,
@@ -310,7 +310,7 @@ impl GpuPredictor {
             n_samples: n_samples as u32,
         };
         
-        kernel_average(&params, input_buffer, output_buffer)
+        kernel_average(params, input_buffer, output_buffer)
             .map_err(|e| format!("Average kernel failed: {:?}", e))?;
         
         // Read results
@@ -369,7 +369,7 @@ impl GpuPredictor {
             beta: 0.0,
         };
         
-        kernel_matmul(&params, a_buffer, b_buffer, c_buffer)
+        kernel_matmul(params, a_buffer, b_buffer, c_buffer)
             .map_err(|e| format!("Matmul kernel failed: {:?}", e))?;
         
         // Read results
