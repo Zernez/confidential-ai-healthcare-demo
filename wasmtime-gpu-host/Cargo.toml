@@ -16,8 +16,8 @@ wgpu = { version = "23.0", features = ["vulkan-portability"] }
 
 # CUDA bindings (optional, for H100 support)
 # cudarc provides cuBLAS, cuRAND, and raw CUDA driver API
-# cuda-version-from-build-system: auto-detect CUDA version at build time
-cudarc = { version = "0.12", features = ["cublas", "curand", "nvrtc", "cuda-version-from-build-system"], optional = true }
+# Note: Using cuda-12060 (latest supported) - CUDA 13.0 not yet supported by cudarc
+cudarc = { version = "0.12", features = ["cublas", "curand", "nvrtc", "cuda-12060"], optional = true }
 
 # Async runtime
 tokio = { version = "1", features = ["full"] }
