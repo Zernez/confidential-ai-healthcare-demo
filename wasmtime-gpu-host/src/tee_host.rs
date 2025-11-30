@@ -880,7 +880,7 @@ mod base64 {
         general_purpose::STANDARD.encode(data)
     }
     
-    pub fn decode(s: &str) -> Result<Vec<u8>, base64_crate::DecodeError> {
+    pub fn decode(s: &str) -> Result<Vec<u8>, base64::DecodeError> {
         general_purpose::STANDARD.decode(s)
     }
 }
