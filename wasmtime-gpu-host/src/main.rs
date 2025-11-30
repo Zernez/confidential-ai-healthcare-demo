@@ -2,10 +2,11 @@
 //!
 //! Runs WASM modules that use the wasi:gpu interface.
 //! Automatically selects between CUDA and WebGPU backends.
+//! Supports TEE attestation (AMD SEV-SNP + NVIDIA CC).
 
-mod attestation;
 mod backend;
 mod host;
+mod tee_host;
 
 use anyhow::{Context, Result};
 use clap::Parser;
@@ -17,6 +18,7 @@ use wasmtime_wasi::WasiCtxBuilder;
 
 use backend::GpuBackend;
 use host::GpuState;
+use tee_host::{TeeHost, AsTeeHost};
 
 #[cfg(feature = "cuda")]
 use backend::cuda::CudaBackend;
@@ -47,10 +49,17 @@ struct Args {
     wasm_args: Vec<String>,
 }
 
-/// Combined state for WASI + GPU
+/// Combined state for WASI + GPU + TEE
 struct HostState {
     wasi: WasiP1Ctx,
     gpu: GpuState,
+    tee: TeeHost,
+}
+
+impl AsTeeHost for HostState {
+    fn as_tee_host(&self) -> &TeeHost {
+        &self.tee
+    }
 }
 
 fn main() -> Result<()> {
@@ -67,7 +76,7 @@ fn main() -> Result<()> {
     
     info!("╔══════════════════════════════════════════════════════════╗");
     info!("║       Wasmtime GPU Host Runtime                          ║");
-    info!("║       wasi:gpu enabled (CUDA + WebGPU backends)          ║");
+    info!("║       wasi:gpu + TEE attestation (CUDA + WebGPU)         ║");
     info!("╚══════════════════════════════════════════════════════════╝");
     
     // Select GPU backend
@@ -75,6 +84,11 @@ fn main() -> Result<()> {
     
     info!("[Runtime] Using backend: {}", backend.device_info().backend);
     info!("[Runtime] Device: {}", backend.device_info().name);
+    
+    // Initialize TEE Host
+    let tee_host = TeeHost::new();
+    let tee_type = tee_host.detect_tee_type();
+    info!("[Runtime] TEE type: {}", tee_type);
     
     // Create engine
     let mut config = Config::new();
@@ -104,7 +118,7 @@ fn main() -> Result<()> {
     host::add_to_linker(&mut linker, |state: &mut HostState| &mut state.gpu)?;
     
     // Add attestation functions
-    attestation::add_to_linker(&mut linker)?;
+    tee_host.register_functions(&mut linker)?;
     
     // Build WASI context
     let workdir = args.workdir.unwrap_or_else(|| std::env::current_dir().unwrap());
@@ -129,6 +143,7 @@ fn main() -> Result<()> {
     let state = HostState {
         wasi,
         gpu: GpuState::new(backend),
+        tee: tee_host,
     };
     
     let mut store = Store::new(&engine, state);

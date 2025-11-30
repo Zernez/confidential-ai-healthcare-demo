@@ -15,8 +15,6 @@ wasmtime-wasi = "27"
 wgpu = { version = "23.0", features = ["vulkan-portability"] }
 
 # CUDA bindings (optional, for H100 support)
-# cudarc provides cuBLAS, cuRAND, and raw CUDA driver API
-# Note: Using cuda-12060 (latest supported) - CUDA 13.0 not yet supported by cudarc
 cudarc = { version = "0.12", features = ["cublas", "curand", "nvrtc", "cuda-12060"], optional = true }
 
 # Async runtime
@@ -28,15 +26,42 @@ anyhow = "1.0"
 thiserror = "2.0"
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+log = "0.4"
 bytemuck = { version = "1.14", features = ["derive"] }
+
+# Serialization
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+hex = "0.4"
+bincode = "1.3"
+base64 = "0.22"
 
 # CLI
 clap = { version = "4", features = ["derive"] }
 
+# Attestation - lunal-attestation for TDX and NVIDIA
+lunal-attestation = { path = "../attestation-rs/lunal-attestation", optional = true }
+
+# AMD SEV-SNP attestation via vTPM
+amd-vtpm = { path = "../attestation-rs/amd-vtpm", optional = true }
+vtpm-attestation = { path = "../attestation-rs/vtpm-attestation", optional = true }
+
+# SEV crate for parsing SNP reports
+sev = { version = "6.2.1", features = ["crypto_nossl"], optional = true }
+
 [features]
-default = ["cuda"]
+default = ["cuda", "attestation-azure"]
 cuda = ["dep:cudarc"]
 webgpu-only = []
+
+# Individual attestation features
+attestation-tdx = ["lunal-attestation", "lunal-attestation/attestation-tdx"]
+attestation-nvidia = ["lunal-attestation", "lunal-attestation/attestation-nvidia"]
+attestation-amd = ["amd-vtpm", "amd-vtpm/attester", "vtpm-attestation", "vtpm-attestation/tpm", "sev"]
+
+# Combined features
+attestation-all = ["attestation-tdx", "attestation-nvidia", "attestation-amd"]
+attestation-azure = ["attestation-amd", "attestation-nvidia"]  # Azure CVM with H100
 
 [[bin]]
 name = "wasmtime-gpu-host"
