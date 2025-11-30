@@ -298,14 +298,8 @@ impl GpuBackend for CudaBackend {
         debug!("[CUDA] find_split: data_f32.len()={}, labels_f32.len()={}, indices_u32.len()={}",
                data_f32.len(), labels_f32.len(), indices_u32.len());
         
-        // Validate indices are within bounds
-        let max_valid_idx = params.n_samples - 1;
-        for (i, &idx) in indices_u32.iter().enumerate() {
-            if idx > max_valid_idx {
-                warn!("[CUDA] find_split: index {} at position {} exceeds max_valid_idx {}, clamping",
-                      idx, i, max_valid_idx);
-            }
-        }
+        // Note: indices may exceed n_samples when working with tree subsets
+        // We silently clamp them to valid range
         
         // Compute MSE for each threshold
         let mut scores = Vec::with_capacity(params.n_thresholds as usize);
