@@ -874,8 +874,7 @@ fn read_string_from_wasm<T>(caller: &mut Caller<'_, T>, ptr: i32, len: i32) -> R
 
 // Re-export base64 functions
 mod base64 {
-    use base64_crate::{Engine as _, engine::general_purpose};
-    use base64_crate as base64_crate;
+    use base64::{Engine as _, engine::general_purpose};
     
     pub fn encode(data: &[u8]) -> String {
         general_purpose::STANDARD.encode(data)
@@ -886,4 +885,4 @@ mod base64 {
     }
 }
 
-use ::base64 as base64_crate;
+// use ::base64 as base64_crate;
