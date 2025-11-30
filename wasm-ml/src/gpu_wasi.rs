@@ -5,7 +5,11 @@
 //!
 //! The WASM module is completely agnostic to the underlying GPU backend.
 
-use bytemuck::{Pod, Zeroable};
+
+use bytemuck::{Pod, Zeroable, cast_slice};
+// Import types and functions from generated WIT bindings
+use crate::wasi::gpu::compute::{DeviceInfo, BufferUsage, BufferId, get_device_info, buffer_create, buffer_write, buffer_read, buffer_destroy, sync};
+use crate::wasi::gpu::ml_kernels::{BootstrapParams, kernel_bootstrap_sample, FindSplitParams, kernel_find_split, AverageParams, kernel_average, MatmulParams, kernel_matmul};
 
 // Generate bindings from WIT
 wit_bindgen::generate!({
