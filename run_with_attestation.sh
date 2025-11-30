@@ -220,17 +220,8 @@ if [ -n "$VERBOSE" ]; then
     export RUST_LOG=debug
 fi
 
-# Add workdir for wasmtime-gpu-host (uses --workdir instead of --dir)
-if [ -n "$DATA_DIR" ] && [ -d "$DATA_DIR" ]; then
-    # Check which runtime we're using to use correct flag
-    if [[ "$RUNTIME" == *"wasmtime-gpu-host"* ]]; then
-        CMD="$CMD --workdir $DATA_DIR"
-    else
-        CMD="$CMD --dir $DATA_DIR"
-    fi
-else
-    echo "Warning: Data directory not found. Run ./setup_data.sh first."
-fi
+# Add workdir - use project root so WASM can access data/diabetes_train.csv
+CMD="$CMD --workdir $PROJECT_ROOT"
 
 # Add WASM module
 CMD="$CMD $WASM_MODULE"
