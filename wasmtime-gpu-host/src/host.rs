@@ -182,7 +182,7 @@ pub fn add_to_linker<T: 'static>(
             debug!("[Host] buffer-write(buffer={}, offset={}, len={})", buffer, offset, data_len);
             
             // Read data from WASM memory first
-            let data = match read_memory(&caller, data_ptr as u32, data_len as usize) {
+            let data = match read_memory(&mut caller, data_ptr as u32, data_len as usize) {
                 Some(d) => d,
                 None => {
                     write_u32(&mut caller, retptr as u32, 1);
