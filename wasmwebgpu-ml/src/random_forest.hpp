@@ -14,6 +14,7 @@
 #include <random>
 #include <string>
 #include "dataset.hpp"
+#include "gpu_executor.hpp"
 
 namespace ml {
 
@@ -218,6 +219,15 @@ public:
     void train_with_gpu(const Dataset& dataset, GpuTrainer& gpu_trainer);
     
     /**
+     * @brief Train forest with GPU and progress callback
+     * @param dataset Training dataset
+     * @param gpu_trainer GPU trainer with pre-uploaded data
+     * @param progress_callback Called with (trees_trained, total_trees)
+     */
+    template<typename Callback>
+    void train_with_gpu(const Dataset& dataset, GpuTrainer& gpu_trainer, Callback progress_callback);
+    
+    /**
      * @brief Predict on CPU
      */
     std::vector<float> predict_cpu(const std::vector<float>& data,
@@ -257,6 +267,49 @@ private:
     size_t max_depth_;
     std::vector<DecisionTree> trees_;
 };
+
+// Template implementation for train_with_gpu with callback
+template<typename Callback>
+void RandomForest::train_with_gpu(const Dataset& dataset, GpuTrainer& gpu_trainer, Callback progress_callback) {
+    if (!gpu_trainer.is_available()) {
+        train_cpu(dataset);
+        return;
+    }
+    
+    std::random_device rd;
+    std::mt19937 rng(rd());
+    
+    for (size_t i = 0; i < n_estimators_; ++i) {
+        // Bootstrap sample on GPU
+        uint32_t seed = rng();
+        std::vector<uint32_t> bootstrap_indices = gpu_trainer.bootstrap_sample(
+            dataset.size(), seed
+        );
+        
+        // Extract bootstrapped data
+        std::vector<float> sampled_data;
+        std::vector<float> sampled_labels;
+        
+        sampled_data.reserve(dataset.size() * dataset.n_features());
+        sampled_labels.reserve(dataset.size());
+        
+        for (uint32_t idx : bootstrap_indices) {
+            const float* sample = dataset.get_sample(idx);
+            sampled_data.insert(sampled_data.end(), sample, sample + dataset.n_features());
+            sampled_labels.push_back(dataset.get_label(idx));
+        }
+        
+        // Train tree with GPU-accelerated split finding
+        DecisionTree tree(max_depth_);
+        tree.train_with_gpu(sampled_data, sampled_labels, bootstrap_indices,
+                            dataset.n_features(), gpu_trainer, rng);
+        
+        trees_.push_back(std::move(tree));
+        
+        // Call progress callback
+        progress_callback(i + 1, n_estimators_);
+    }
+}
 
 } // namespace ml
 
