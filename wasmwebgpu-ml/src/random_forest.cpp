@@ -381,10 +381,6 @@ void RandomForest::train_cpu(const Dataset& dataset) {
     std::random_device rd;
     std::mt19937 rng(rd());
     
-    std::cout << "[TRAINING] RandomForest: " << n_estimators_ 
-              << " trees, max_depth " << max_depth_ << std::endl;
-    std::cout << "[TRAINING] Training on CPU..." << std::endl;
-    
     for (size_t i = 0; i < n_estimators_; ++i) {
         auto [sampled_data, sampled_labels] = dataset.bootstrap_sample(rng);
         
@@ -393,29 +389,17 @@ void RandomForest::train_cpu(const Dataset& dataset) {
                       dataset.size(), dataset.n_features(), rng);
         
         trees_.push_back(std::move(tree));
-        
-        if ((i + 1) % 10 == 0) {
-            std::cerr << "Trained " << (i + 1) << "/" << n_estimators_ 
-                      << " trees (CPU)" << std::endl;
-        }
     }
-    
-    std::cout << "[TRAINING] Training completed!" << std::endl;
 }
 
 void RandomForest::train_with_gpu(const Dataset& dataset, GpuTrainer& gpu_trainer) {
     if (!gpu_trainer.is_available()) {
-        std::cout << "[TRAINING] GPU not available, using CPU..." << std::endl;
         train_cpu(dataset);
         return;
     }
     
     std::random_device rd;
     std::mt19937 rng(rd());
-    
-    std::cout << "[TRAINING] RandomForest: " << n_estimators_ 
-              << " trees, max_depth " << max_depth_ << std::endl;
-    std::cout << "[TRAINING] Training with GPU acceleration (wasi:gpu)..." << std::endl;
     
     for (size_t i = 0; i < n_estimators_; ++i) {
         // Bootstrap sample on GPU
@@ -443,14 +427,7 @@ void RandomForest::train_with_gpu(const Dataset& dataset, GpuTrainer& gpu_traine
                             dataset.n_features(), gpu_trainer, rng);
         
         trees_.push_back(std::move(tree));
-        
-        if ((i + 1) % 10 == 0) {
-            std::cerr << "Trained " << (i + 1) << "/" << n_estimators_ 
-                      << " trees (GPU)" << std::endl;
-        }
     }
-    
-    std::cout << "[TRAINING] Training completed!" << std::endl;
 }
 
 std::vector<float> RandomForest::predict_cpu(
@@ -483,7 +460,6 @@ std::vector<float> RandomForest::predict_with_gpu(
     GpuPredictor& predictor
 ) {
     if (!predictor.is_available()) {
-        std::cout << "[INFERENCE] GPU not available, using CPU..." << std::endl;
         return predict_cpu(data, n_samples, n_features);
     }
     

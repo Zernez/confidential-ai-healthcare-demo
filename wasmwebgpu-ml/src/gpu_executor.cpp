@@ -20,8 +20,6 @@ namespace ml {
 // ═══════════════════════════════════════════════════════════════════════════
 
 GpuExecutor::GpuExecutor() : available_(false) {
-    std::cerr << "[wasi:gpu] Initializing GPU executor..." << std::endl;
-    
     // Query device info from host using the wrapper function
     wasi_gpu_device_info_t info = {0};
     wasi_gpu_get_device_info(&info);
@@ -35,23 +33,10 @@ GpuExecutor::GpuExecutor() : available_(false) {
     // Check if we got valid device info
     if (!device_info_.name.empty() && device_info_.total_memory > 0) {
         available_ = true;
-        std::cerr << "[wasi:gpu] Connected to GPU: " << device_info_.name << std::endl;
-        std::cerr << "[wasi:gpu] Backend: " << device_info_.backend << std::endl;
-        std::cerr << "[wasi:gpu] Memory: " << (device_info_.total_memory / (1024*1024)) << " MB" << std::endl;
-        std::cerr << "[wasi:gpu] Hardware GPU: " << (device_info_.is_hardware ? "YES" : "NO") << std::endl;
-        
-        if (!device_info_.is_hardware) {
-            std::cerr << "[wasi:gpu] WARNING: Using software renderer, performance will be slow" << std::endl;
-        }
-    } else {
-        std::cerr << "[wasi:gpu] GPU not available, will use CPU fallback" << std::endl;
     }
 }
 
 GpuExecutor::~GpuExecutor() {
-    if (available_) {
-        std::cerr << "[wasi:gpu] Cleaning up GPU resources..." << std::endl;
-    }
 }
 
 uint32_t GpuExecutor::create_buffer(uint64_t size, uint32_t usage) {
@@ -61,7 +46,6 @@ uint32_t GpuExecutor::create_buffer(uint64_t size, uint32_t usage) {
     wasi_gpu_error err = wasi_gpu_buffer_create(size, usage, &buffer_id);
     
     if (err != WASI_GPU_SUCCESS) {
-        std::cerr << "[wasi:gpu] Buffer creation failed: error " << err << std::endl;
         return 0;
     }
     
@@ -109,9 +93,6 @@ void GpuExecutor::sync() {
 }
 
 std::vector<uint32_t> GpuExecutor::bootstrap_sample(size_t n_samples, uint32_t seed, uint32_t max_index) {
-    std::cerr << "[wasi:gpu] bootstrap_sample(n_samples=" << n_samples 
-              << ", seed=" << seed << ", max_index=" << max_index << ")" << std::endl;
-    
     if (!available_) {
         return bootstrap_sample_cpu(n_samples, seed, max_index);
     }
@@ -124,7 +105,6 @@ std::vector<uint32_t> GpuExecutor::bootstrap_sample(size_t n_samples, uint32_t s
     );
     
     if (output_buffer == 0) {
-        std::cerr << "[wasi:gpu] Failed to create output buffer, falling back to CPU" << std::endl;
         return bootstrap_sample_cpu(n_samples, seed, max_index);
     }
     
@@ -138,7 +118,6 @@ std::vector<uint32_t> GpuExecutor::bootstrap_sample(size_t n_samples, uint32_t s
     wasi_gpu_error err = wasi_gpu_kernel_bootstrap_sample(&params, output_buffer);
     
     if (err != WASI_GPU_SUCCESS) {
-        std::cerr << "[wasi:gpu] Bootstrap kernel failed: error " << err << ", falling back to CPU" << std::endl;
         destroy_buffer(output_buffer);
         return bootstrap_sample_cpu(n_samples, seed, max_index);
     }
@@ -146,7 +125,6 @@ std::vector<uint32_t> GpuExecutor::bootstrap_sample(size_t n_samples, uint32_t s
     // Read results
     std::vector<uint32_t> indices(n_samples);
     if (!read_buffer(output_buffer, 0, indices.data(), output_size)) {
-        std::cerr << "[wasi:gpu] Failed to read results, falling back to CPU" << std::endl;
         destroy_buffer(output_buffer);
         return bootstrap_sample_cpu(n_samples, seed, max_index);
     }
@@ -154,7 +132,6 @@ std::vector<uint32_t> GpuExecutor::bootstrap_sample(size_t n_samples, uint32_t s
     // Cleanup
     destroy_buffer(output_buffer);
     
-    std::cerr << "[wasi:gpu] Bootstrap completed on GPU" << std::endl;
     return indices;
 }
 
@@ -252,9 +229,6 @@ std::vector<float> GpuExecutor::average_predictions(
     size_t n_samples,
     size_t n_trees
 ) {
-    std::cerr << "[wasi:gpu] average_predictions(n_samples=" << n_samples 
-              << ", n_trees=" << n_trees << ")" << std::endl;
-    
     if (!available_) {
         return average_predictions_cpu(tree_predictions, n_samples, n_trees);
     }
@@ -312,8 +286,6 @@ std::vector<float> GpuExecutor::matmul(
     const std::vector<float>& b,
     size_t m, size_t k, size_t n
 ) {
-    std::cerr << "[wasi:gpu] matmul(" << m << "x" << k << " @ " << k << "x" << n << ")" << std::endl;
-    
     std::vector<float> c(m * n, 0.0f);
     
     if (!available_) {
@@ -397,8 +369,6 @@ std::vector<float> GpuExecutor::matmul(
 
 // CPU Fallback implementations
 std::vector<uint32_t> GpuExecutor::bootstrap_sample_cpu(size_t n_samples, uint32_t seed, uint32_t max_index) {
-    std::cerr << "[wasi:gpu] Using CPU fallback for bootstrap_sample" << std::endl;
-    
     std::vector<uint32_t> indices;
     indices.reserve(n_samples);
     
@@ -425,8 +395,6 @@ std::vector<float> GpuExecutor::average_predictions_cpu(
     size_t n_samples,
     size_t n_trees
 ) {
-    std::cerr << "[wasi:gpu] Using CPU fallback for average_predictions" << std::endl;
-    
     std::vector<float> result;
     result.reserve(n_samples);
     

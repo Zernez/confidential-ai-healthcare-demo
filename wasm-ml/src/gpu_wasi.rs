@@ -34,14 +34,8 @@ impl GpuExecutor {
     pub fn new() -> Result<Self, String> {
         let device_info = get_device_info();
         
-        eprintln!("[wasi:gpu] Connected to GPU: {} ({})", 
-                  device_info.name, device_info.backend);
-        eprintln!("[wasi:gpu] Memory: {} MB, Hardware: {}", 
-                  device_info.total_memory / (1024 * 1024),
-                  device_info.is_hardware);
-        
-        if !device_info.is_hardware {
-            eprintln!("[wasi:gpu] WARNING: Using software renderer, performance will be slow");
+        if device_info.name.is_empty() || device_info.total_memory == 0 {
+            return Err("GPU not available".to_string());
         }
         
         Ok(Self { device_info })
@@ -60,6 +54,11 @@ impl GpuExecutor {
     /// Get backend type ("cuda", "vulkan", "webgpu")
     pub fn backend(&self) -> &str {
         &self.device_info.backend
+    }
+    
+    /// Get total memory in bytes
+    pub fn total_memory(&self) -> u64 {
+        self.device_info.total_memory
     }
     
     /// Allocate a GPU buffer
@@ -143,8 +142,6 @@ impl GpuTrainer {
         )?;
         self.executor.write_buffer(labels_buffer, 0, cast_slice(labels))?;
         self.labels_buffer = Some(labels_buffer);
-        
-        eprintln!("[GpuTrainer] Uploaded {} samples x {} features to GPU", n_samples, n_features);
         
         Ok(())
     }

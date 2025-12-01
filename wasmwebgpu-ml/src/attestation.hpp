@@ -1,224 +1,164 @@
 /**
  * @file attestation.hpp
- * @brief C++ bindings for wasmtime:attestation runtime extension
+ * @brief TEE Attestation bindings for wasmtime:attestation host functions
  * 
- * Provides C++ wrappers around the wasmtime:attestation host functions
- * for TEE (TDX/SEV-SNP) and GPU (NVIDIA NRAS) attestation.
- * 
- * Usage:
- *   #include "attestation.hpp"
- *   
- *   // Attest VM
- *   auto vm_result = wasmtime_attestation::attest_vm();
- *   if (!vm_result.success) {
- *       fprintf(stderr, "VM attestation failed: %s\n", vm_result.error.c_str());
- *       return 1;
- *   }
- *   
- *   // Attest GPU
- *   auto gpu_result = wasmtime_attestation::attest_gpu(0);
- *   if (!gpu_result.success) {
- *       fprintf(stderr, "GPU attestation failed: %s\n", gpu_result.error.c_str());
- *       return 1;
- *   }
- *   
- *   // Verify tokens
- *   if (!wasmtime_attestation::verify_token(vm_result.token.value())) {
- *       fprintf(stderr, "VM token verification failed!\n");
- *       return 1;
- *   }
+ * This provides C++ bindings for the TEE attestation interface implemented
+ * by the wasmtime-gpu-host runtime.
  */
 
-#pragma once
+#ifndef ATTESTATION_HPP
+#define ATTESTATION_HPP
 
-#include <string>
-#include <optional>
 #include <cstdint>
-#include "external/json.hpp"
+#include <cstddef>
+#include <cstring>
+#include <string>
 
-namespace wasmtime_attestation {
+#ifdef __cplusplus
+extern "C" {
+#endif
 
-using json = nlohmann::json;
+// ═══════════════════════════════════════════════════════════════════════════
+// Raw ABI declarations for wasmtime:attestation host functions
+// ═══════════════════════════════════════════════════════════════════════════
+
+/// Result structure for TEE type detection
+/// Layout: tee_type_ptr(4), tee_type_len(4), supports_attestation(4)
+typedef struct {
+    uint32_t tee_type_ptr;
+    uint32_t tee_type_len;
+    uint32_t supports_attestation;
+} attestation_tee_info_raw_t;
+
+/// Result structure for attestation token
+/// Layout: is_err(4), token_ptr(4), token_len(4) OR is_err(4), error_ptr(4), error_len(4)
+typedef struct {
+    uint32_t is_err;
+    uint32_t data_ptr;
+    uint32_t data_len;
+} attestation_result_raw_t;
+
+/// Detect TEE type (raw ABI)
+__attribute__((import_module("wasmtime:attestation")))
+__attribute__((import_name("detect-tee-type")))
+void __attestation_detect_tee_type_raw(attestation_tee_info_raw_t* retptr);
+
+/// Attest VM and get token (raw ABI)
+__attribute__((import_module("wasmtime:attestation")))
+__attribute__((import_name("attest-vm-token")))
+void __attestation_attest_vm_token_raw(attestation_result_raw_t* retptr);
+
+/// Attest GPU and get token (raw ABI)
+__attribute__((import_module("wasmtime:attestation")))
+__attribute__((import_name("attest-gpu-token")))
+void __attestation_attest_gpu_token_raw(uint32_t gpu_index, attestation_result_raw_t* retptr);
+
+#ifdef __cplusplus
+}
+#endif
+
+// ═══════════════════════════════════════════════════════════════════════════
+// C++ Wrapper Classes
+// ═══════════════════════════════════════════════════════════════════════════
+
+namespace attestation {
 
 /**
- * @brief Attestation result from host
+ * @struct TeeInfo
+ * @brief Information about the TEE environment
+ */
+struct TeeInfo {
+    std::string tee_type;
+    bool supports_attestation;
+};
+
+/**
+ * @struct AttestationResult
+ * @brief Result of an attestation operation
  */
 struct AttestationResult {
     bool success;
-    std::optional<std::string> token;
-    std::optional<std::string> evidence;
-    std::optional<std::string> error;
-    int64_t timestamp;
-    
-    /**
-     * @brief Parse from JSON
-     */
-    static AttestationResult from_json(const std::string& json_str) {
-        AttestationResult result;
-        try {
-            auto j = json::parse(json_str);
-            result.success = j["success"].get<bool>();
-            result.timestamp = j["timestamp"].get<int64_t>();
-            
-            if (j.contains("token") && !j["token"].is_null()) {
-                result.token = j["token"].get<std::string>();
-            }
-            if (j.contains("evidence") && !j["evidence"].is_null()) {
-                result.evidence = j["evidence"].get<std::string>();
-            }
-            if (j.contains("error") && !j["error"].is_null()) {
-                result.error = j["error"].get<std::string>();
-            }
-        } catch (const std::exception& e) {
-            result.success = false;
-            result.error = std::string("JSON parse error: ") + e.what();
-            result.timestamp = 0;
-        }
-        return result;
-    }
+    std::string token;      // On success: the attestation token
+    std::string error;      // On failure: error message
 };
 
-// External C declarations for host functions
-extern "C" {
-    /**
-     * @brief Attest the VM (TDX/SEV-SNP)
-     * @return Pointer to JSON AttestationResult in host memory
-     */
-    int32_t __attribute__((
-        __import_module__("wasmtime_attestation"),
-        __import_name__("attest_vm")
-    )) wasmtime_attest_vm();
-    
-    /**
-     * @brief Attest the GPU (NVIDIA NRAS)
-     * @param gpu_index GPU device index (0-based)
-     * @return Pointer to JSON AttestationResult in host memory
-     */
-    int32_t __attribute__((
-        __import_module__("wasmtime_attestation"),
-        __import_name__("attest_gpu")
-    )) wasmtime_attest_gpu(uint32_t gpu_index);
-    
-    /**
-     * @brief Verify a JWT token
-     * @param token_ptr Pointer to token string in WASM memory
-     * @param token_len Length of token string
-     * @return 1 if valid, 0 if invalid
-     */
-    int32_t __attribute__((
-        __import_module__("wasmtime_attestation"),
-        __import_name__("verify_token")
-    )) wasmtime_verify_token(const char* token_ptr, int32_t token_len);
-    
-    /**
-     * @brief Clear cached attestation tokens
-     */
-    void __attribute__((
-        __import_module__("wasmtime_attestation"),
-        __import_name__("clear_cache")
-    )) wasmtime_clear_cache();
-}
-
 /**
- * @brief Read JSON string from host memory
- * @param ptr Pointer returned by host function
- * @return JSON string
+ * @brief Detect the TEE type (AMD SEV-SNP, Intel TDX, etc.)
  */
-inline std::string read_json_from_host(int32_t ptr) {
-    if (ptr == 0) {
-        return R"({"success":false,"error":"Host returned null pointer"})";
+inline TeeInfo detect_tee_type() {
+    TeeInfo info;
+    attestation_tee_info_raw_t raw;
+    
+    __attestation_detect_tee_type_raw(&raw);
+    
+    if (raw.tee_type_ptr != 0 && raw.tee_type_len > 0) {
+        const char* src = reinterpret_cast<const char*>(static_cast<uintptr_t>(raw.tee_type_ptr));
+        info.tee_type = std::string(src, raw.tee_type_len);
+    } else {
+        info.tee_type = "Unknown";
     }
     
-    // Read: [len: 4 bytes][data: len bytes]
-    const uint8_t* base = reinterpret_cast<const uint8_t*>(ptr);
-    uint32_t len = *reinterpret_cast<const uint32_t*>(base);
-    const char* data = reinterpret_cast<const char*>(base + 4);
+    info.supports_attestation = (raw.supports_attestation != 0);
     
-    return std::string(data, len);
+    return info;
 }
 
 /**
- * @brief Attest VM and return result
- * @return AttestationResult
+ * @brief Attest the VM and get a token
  */
 inline AttestationResult attest_vm() {
-    int32_t ptr = wasmtime_attest_vm();
-    std::string json_str = read_json_from_host(ptr);
-    return AttestationResult::from_json(json_str);
+    AttestationResult result;
+    attestation_result_raw_t raw;
+    
+    __attestation_attest_vm_token_raw(&raw);
+    
+    if (raw.is_err == 0) {
+        result.success = true;
+        if (raw.data_ptr != 0 && raw.data_len > 0) {
+            const char* src = reinterpret_cast<const char*>(static_cast<uintptr_t>(raw.data_ptr));
+            result.token = std::string(src, raw.data_len);
+        }
+    } else {
+        result.success = false;
+        if (raw.data_ptr != 0 && raw.data_len > 0) {
+            const char* src = reinterpret_cast<const char*>(static_cast<uintptr_t>(raw.data_ptr));
+            result.error = std::string(src, raw.data_len);
+        } else {
+            result.error = "Unknown error";
+        }
+    }
+    
+    return result;
 }
 
 /**
- * @brief Attest GPU and return result
- * @param gpu_index GPU device index (typically 0)
- * @return AttestationResult
+ * @brief Attest a GPU and get a token
  */
-inline AttestationResult attest_gpu(uint32_t gpu_index) {
-    int32_t ptr = wasmtime_attest_gpu(gpu_index);
-    std::string json_str = read_json_from_host(ptr);
-    return AttestationResult::from_json(json_str);
+inline AttestationResult attest_gpu(uint32_t gpu_index = 0) {
+    AttestationResult result;
+    attestation_result_raw_t raw;
+    
+    __attestation_attest_gpu_token_raw(gpu_index, &raw);
+    
+    if (raw.is_err == 0) {
+        result.success = true;
+        if (raw.data_ptr != 0 && raw.data_len > 0) {
+            const char* src = reinterpret_cast<const char*>(static_cast<uintptr_t>(raw.data_ptr));
+            result.token = std::string(src, raw.data_len);
+        }
+    } else {
+        result.success = false;
+        if (raw.data_ptr != 0 && raw.data_len > 0) {
+            const char* src = reinterpret_cast<const char*>(static_cast<uintptr_t>(raw.data_ptr));
+            result.error = std::string(src, raw.data_len);
+        } else {
+            result.error = "Unknown error";
+        }
+    }
+    
+    return result;
 }
 
-/**
- * @brief Verify a JWT token
- * @param token JWT token string
- * @return true if valid, false otherwise
- */
-inline bool verify_token(const std::string& token) {
-    int32_t result = wasmtime_verify_token(token.c_str(), token.length());
-    return result == 1;
-}
+} // namespace attestation
 
-/**
- * @brief Clear all cached attestation tokens
- */
-inline void clear_cache() {
-    wasmtime_clear_cache();
-}
-
-/**
- * @brief Helper: Run full attestation workflow (VM + GPU)
- * @param gpu_index GPU device index
- * @return true if all attestations passed, false otherwise
- */
-inline bool attest_all(uint32_t gpu_index = 0) {
-    // Attest VM
-    printf("🔐 Attesting VM (TDX/SEV-SNP)...\n");
-    auto vm_result = attest_vm();
-    if (!vm_result.success) {
-        fprintf(stderr, "❌ VM attestation failed: %s\n", 
-                vm_result.error.value_or("Unknown error").c_str());
-        return false;
-    }
-    printf("✓ VM attestation successful\n");
-    
-    // Attest GPU
-    printf("🔐 Attesting GPU (device %u)...\n", gpu_index);
-    auto gpu_result = attest_gpu(gpu_index);
-    if (!gpu_result.success) {
-        fprintf(stderr, "❌ GPU attestation failed: %s\n",
-                gpu_result.error.value_or("Unknown error").c_str());
-        return false;
-    }
-    printf("✓ GPU attestation successful\n");
-    
-    // Verify VM token
-    printf("🔍 Verifying VM token...\n");
-    if (!vm_result.token.has_value() || !verify_token(vm_result.token.value())) {
-        fprintf(stderr, "❌ VM token verification failed\n");
-        return false;
-    }
-    printf("✓ VM token verified\n");
-    
-    // Verify GPU token
-    printf("🔍 Verifying GPU token...\n");
-    if (!gpu_result.token.has_value() || !verify_token(gpu_result.token.value())) {
-        fprintf(stderr, "❌ GPU token verification failed\n");
-        return false;
-    }
-    printf("✓ GPU token verified\n");
-    
-    printf("\n✅ All attestations passed!\n\n");
-    return true;
-}
-
-} // namespace wasmtime_attestation
+#endif // ATTESTATION_HPP
