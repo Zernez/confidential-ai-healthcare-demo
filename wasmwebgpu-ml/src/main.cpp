@@ -41,39 +41,115 @@ extern "C" {
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
-// Read JSON from pointer returned by host - MUST be called immediately
-// after host function, before any other host call (they share offset 1024)
+// Simple JSON field extraction without std::string allocation for large data
+// Works directly on the memory buffer
 // ═══════════════════════════════════════════════════════════════════════════
 
-std::string read_host_json(int32_t ptr) {
-    if (ptr == 0 || ptr < 0) return "{}";
-    
+// Get length of JSON at pointer
+uint32_t get_json_len(int32_t ptr) {
+    if (ptr == 0 || ptr < 0) return 0;
     const unsigned char* p = (const unsigned char*)(uintptr_t)ptr;
-    uint32_t len = p[0] | (p[1] << 8) | (p[2] << 16) | (p[3] << 24);
-    
-    if (len == 0 || len > 100000) return "{}";
-    
-    return std::string((const char*)(p + 4), len);
+    return p[0] | (p[1] << 8) | (p[2] << 16) | (p[3] << 24);
 }
 
-std::string json_get(const std::string& json, const std::string& key) {
-    size_t pos = json.find("\"" + key + "\"");
-    if (pos == std::string::npos) return "";
-    pos = json.find(':', pos);
-    if (pos == std::string::npos) return "";
-    pos++;
-    while (pos < json.size() && json[pos] == ' ') pos++;
-    if (json[pos] == '"') {
-        pos++;
-        size_t end = json.find('"', pos);
-        return json.substr(pos, end - pos);
+// Check if JSON contains "success":true
+bool json_has_success(int32_t ptr) {
+    if (ptr == 0 || ptr < 0) return false;
+    const char* p = (const char*)(uintptr_t)ptr;
+    uint32_t len = get_json_len(ptr);
+    if (len == 0 || len > 100000) return false;
+    
+    // Search for "success":true in first 200 bytes
+    const char* data = p + 4;
+    size_t search_len = (len < 200) ? len : 200;
+    for (size_t i = 0; i + 14 < search_len; i++) {
+        if (data[i] == '"' && data[i+1] == 's' && data[i+2] == 'u' &&
+            data[i+3] == 'c' && data[i+4] == 'c' && data[i+5] == 'e' &&
+            data[i+6] == 's' && data[i+7] == 's' && data[i+8] == '"') {
+            // Found "success", now look for :true
+            for (size_t j = i + 9; j + 4 < search_len; j++) {
+                if (data[j] == 't' && data[j+1] == 'r' && 
+                    data[j+2] == 'u' && data[j+3] == 'e') {
+                    return true;
+                }
+                if (data[j] == 'f' && data[j+1] == 'a' && 
+                    data[j+2] == 'l' && data[j+3] == 's' && data[j+4] == 'e') {
+                    return false;
+                }
+            }
+        }
     }
-    size_t end = json.find_first_of(",}", pos);
-    return json.substr(pos, end - pos);
+    return false;
 }
 
-bool json_bool(const std::string& json, const std::string& key) {
-    return json_get(json, key) == "true";
+// Extract small string field (tee_type, etc.) - max 100 chars
+std::string json_get_small(int32_t ptr, const char* key) {
+    if (ptr == 0 || ptr < 0) return "";
+    const char* p = (const char*)(uintptr_t)ptr;
+    uint32_t len = get_json_len(ptr);
+    if (len == 0 || len > 100000) return "";
+    
+    const char* data = p + 4;
+    size_t keylen = 0;
+    while (key[keylen]) keylen++;
+    
+    // Search for "key": in first 500 bytes
+    size_t search_len = (len < 500) ? len : 500;
+    for (size_t i = 0; i + keylen + 3 < search_len; i++) {
+        if (data[i] == '"') {
+            bool match = true;
+            for (size_t k = 0; k < keylen && match; k++) {
+                if (data[i + 1 + k] != key[k]) match = false;
+            }
+            if (match && data[i + 1 + keylen] == '"') {
+                // Found key, look for value
+                size_t j = i + 2 + keylen;
+                while (j < search_len && data[j] != ':') j++;
+                j++; // skip ':'
+                while (j < search_len && (data[j] == ' ' || data[j] == '\t')) j++;
+                
+                if (data[j] == '"') {
+                    j++; // skip opening quote
+                    size_t start = j;
+                    while (j < search_len && data[j] != '"' && j - start < 100) j++;
+                    return std::string(data + start, j - start);
+                } else {
+                    // Non-string value
+                    size_t start = j;
+                    while (j < search_len && data[j] != ',' && data[j] != '}' && j - start < 50) j++;
+                    return std::string(data + start, j - start);
+                }
+            }
+        }
+    }
+    return "";
+}
+
+// Get token length by finding "token":"..." and counting
+size_t json_get_token_len(int32_t ptr) {
+    if (ptr == 0 || ptr < 0) return 0;
+    const char* p = (const char*)(uintptr_t)ptr;
+    uint32_t len = get_json_len(ptr);
+    if (len == 0 || len > 100000) return 0;
+    
+    const char* data = p + 4;
+    
+    // Search for "token":" 
+    for (size_t i = 0; i + 9 < len; i++) {
+        if (data[i] == '"' && data[i+1] == 't' && data[i+2] == 'o' &&
+            data[i+3] == 'k' && data[i+4] == 'e' && data[i+5] == 'n' &&
+            data[i+6] == '"') {
+            // Found "token", look for :"
+            size_t j = i + 7;
+            while (j < len && data[j] != '"') j++;
+            if (j >= len) return 0;
+            j++; // skip opening quote
+            size_t start = j;
+            while (j < len && data[j] != '"') j++;
+            return j - start;
+        }
+    }
+    return 0;
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -156,36 +232,32 @@ int main() {
     std::cout << "\n=== TEE ATTESTATION ===\n";
     Timer att_timer;
     
-    // 1. Detect TEE - call and read IMMEDIATELY before next host call
+    // 1. Detect TEE
     {
         int32_t ptr = wasm_detect_tee();
-        std::string json = read_host_json(ptr);  // Read NOW before next call
-        results.tee_type = json_get(json, "tee_type");
-        results.tee_available = json_bool(json, "supports_attestation");
+        results.tee_type = json_get_small(ptr, "tee_type");
+        std::string supports = json_get_small(ptr, "supports_attestation");
+        results.tee_available = (supports == "true");
         std::cout << "[TEE] Type: " << results.tee_type << "\n";
         std::cout << "[TEE] Supports attestation: " << (results.tee_available ? "YES" : "NO") << "\n";
     }
     
-    // 2. VM attestation - call and read IMMEDIATELY
-    size_t vm_token_len = 0;
+    // 2. VM attestation
     {
         int32_t ptr = wasm_attest_vm();
-        std::string json = read_host_json(ptr);  // Read NOW before next call
-        if (json_bool(json, "success")) {
-            vm_token_len = json_get(json, "token").length();
-        }
-        std::cout << "[TEE] VM attestation: OK (token: " << vm_token_len << " chars)\n";
+        bool success = json_has_success(ptr);
+        size_t token_len = success ? json_get_token_len(ptr) : 0;
+        std::cout << "[TEE] VM attestation: " << (success ? "OK" : "FAILED") 
+                  << " (token: " << token_len << " chars)\n";
     }
     
-    // 3. GPU attestation - call and read IMMEDIATELY
-    size_t gpu_token_len = 0;
+    // 3. GPU attestation
     {
         int32_t ptr = wasm_attest_gpu(0);
-        std::string json = read_host_json(ptr);  // Read NOW before next call
-        if (json_bool(json, "success")) {
-            gpu_token_len = json_get(json, "token").length();
-        }
-        std::cout << "[TEE] GPU attestation: OK (token: " << gpu_token_len << " chars)\n";
+        bool success = json_has_success(ptr);
+        size_t token_len = success ? json_get_token_len(ptr) : 0;
+        std::cout << "[TEE] GPU attestation: " << (success ? "OK" : "FAILED")
+                  << " (token: " << token_len << " chars)\n";
     }
     
     results.attestation_ms = att_timer.elapsed_ms();
