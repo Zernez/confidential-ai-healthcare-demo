@@ -39,6 +39,10 @@ if(BUILD_WASM)
         -Wl,--lto-O3                 # LTO optimization
         # Allow undefined symbols for wasi:gpu imports
         -Wl,--allow-undefined
+        # Increase initial memory for large attestation tokens
+        -Wl,--initial-memory=2097152  # 2MB initial memory
+        -Wl,--max-memory=16777216     # 16MB max memory
+        -Wl,-z,stack-size=131072      # 128KB stack
     )
     
     message(STATUS "Building for WASM target with wasi:gpu interface")
