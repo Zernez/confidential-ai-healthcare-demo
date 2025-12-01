@@ -175,11 +175,11 @@ int main(int argc, char** argv) {
     }
     
     // Attest GPU
-    auto gpu_result = attestation::attest_gpu(0);
-    if (gpu_result.success) {
-        std::cout << "[TEE] GPU attestation: OK (token: " << gpu_result.token.length() << " chars)" << std::endl;
+    auto gpu_attest_result = attestation::attest_gpu(0);
+    if (gpu_attest_result.success) {
+        std::cout << "[TEE] GPU attestation: OK (token: " << gpu_attest_result.token.length() << " chars)" << std::endl;
     } else {
-        std::cout << "[TEE] GPU attestation: FAILED (" << gpu_result.error << ")" << std::endl;
+        std::cout << "[TEE] GPU attestation: FAILED (" << gpu_attest_result.error << ")" << std::endl;
     }
     
     results.attestation_ms = attestation_timer.elapsed_ms();
@@ -228,7 +228,7 @@ int main(int argc, char** argv) {
                                           train_dataset.size(), 
                                           train_dataset.n_features());
         
-        // Train with GPU (with progress callback)
+        // Train with GPU (with progress output matching Rust)
         rf.train_with_gpu(train_dataset, gpu_trainer, [](size_t trained, size_t total) {
             if (trained % 10 == 0) {
                 std::cerr << "Trained " << trained << "/" << total << " trees (GPU)" << std::endl;
