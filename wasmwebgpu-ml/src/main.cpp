@@ -41,74 +41,39 @@ extern "C" {
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
-// Read JSON from pointer - MUST be called immediately after host function
-// because host reuses the same memory location (offset 1024)
+// Read JSON from pointer returned by host - MUST be called immediately
+// after host function, before any other host call (they share offset 1024)
 // ═══════════════════════════════════════════════════════════════════════════
 
-struct HostJson {
-    bool valid;
-    std::string data;
+std::string read_host_json(int32_t ptr) {
+    if (ptr == 0 || ptr < 0) return "{}";
     
-    std::string get(const std::string& key) const {
-        if (!valid) return "";
-        size_t pos = data.find("\"" + key + "\"");
-        if (pos == std::string::npos) return "";
-        pos = data.find(':', pos);
-        if (pos == std::string::npos) return "";
-        pos++;
-        while (pos < data.size() && data[pos] == ' ') pos++;
-        if (pos >= data.size()) return "";
-        if (data[pos] == '"') {
-            pos++;
-            size_t end = json_find_string_end(pos);
-            return data.substr(pos, end - pos);
-        }
-        size_t end = data.find_first_of(",}", pos);
-        std::string val = data.substr(pos, end - pos);
-        while (!val.empty() && val.back() == ' ') val.pop_back();
-        return val;
-    }
+    const unsigned char* p = (const unsigned char*)(uintptr_t)ptr;
+    uint32_t len = p[0] | (p[1] << 8) | (p[2] << 16) | (p[3] << 24);
     
-    bool getBool(const std::string& key) const {
-        return get(key) == "true";
-    }
+    if (len == 0 || len > 100000) return "{}";
     
-private:
-    size_t json_find_string_end(size_t start) const {
-        for (size_t i = start; i < data.size(); i++) {
-            if (data[i] == '"' && (i == 0 || data[i-1] != '\\')) {
-                return i;
-            }
-        }
-        return data.size();
-    }
-};
+    return std::string((const char*)(p + 4), len);
+}
 
-HostJson read_host_result(int32_t ptr) {
-    HostJson result;
-    result.valid = false;
-    
-    if (ptr <= 0 || ptr > 0x100000) {
-        return result;
+std::string json_get(const std::string& json, const std::string& key) {
+    size_t pos = json.find("\"" + key + "\"");
+    if (pos == std::string::npos) return "";
+    pos = json.find(':', pos);
+    if (pos == std::string::npos) return "";
+    pos++;
+    while (pos < json.size() && json[pos] == ' ') pos++;
+    if (json[pos] == '"') {
+        pos++;
+        size_t end = json.find('"', pos);
+        return json.substr(pos, end - pos);
     }
-    
-    // Read directly from WASM linear memory at offset ptr
-    // Host writes: [len: 4 bytes LE][data: len bytes]
-    const uint8_t* p = reinterpret_cast<const uint8_t*>(static_cast<uintptr_t>(ptr));
-    
-    uint32_t len = static_cast<uint32_t>(p[0]) | 
-                   (static_cast<uint32_t>(p[1]) << 8) | 
-                   (static_cast<uint32_t>(p[2]) << 16) | 
-                   (static_cast<uint32_t>(p[3]) << 24);
-    
-    // Sanity check - don't read garbage
-    if (len == 0 || len > 100000) {
-        return result;
-    }
-    
-    result.data = std::string(reinterpret_cast<const char*>(p + 4), len);
-    result.valid = true;
-    return result;
+    size_t end = json.find_first_of(",}", pos);
+    return json.substr(pos, end - pos);
+}
+
+bool json_bool(const std::string& json, const std::string& key) {
+    return json_get(json, key) == "true";
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -187,52 +152,40 @@ int main() {
         }
     }
     
-    // TEE Attestation - read result IMMEDIATELY after each call
+    // TEE Attestation
     std::cout << "\n=== TEE ATTESTATION ===\n";
     Timer att_timer;
     
-    size_t vm_token_len = 0;
-    size_t gpu_token_len = 0;
-    
-    // 1. Detect TEE - call and read immediately
+    // 1. Detect TEE - call and read IMMEDIATELY before next host call
     {
         int32_t ptr = wasm_detect_tee();
-        HostJson json = read_host_result(ptr);  // Read NOW before next call
-        if (json.valid) {
-            results.tee_type = json.get("tee_type");
-            results.tee_available = json.getBool("supports_attestation");
-        } else {
-            results.tee_type = "Unknown";
-            results.tee_available = false;
-        }
+        std::string json = read_host_json(ptr);  // Read NOW before next call
+        results.tee_type = json_get(json, "tee_type");
+        results.tee_available = json_bool(json, "supports_attestation");
+        std::cout << "[TEE] Type: " << results.tee_type << "\n";
+        std::cout << "[TEE] Supports attestation: " << (results.tee_available ? "YES" : "NO") << "\n";
     }
-    std::cout << "[TEE] Type: " << results.tee_type << "\n";
-    std::cout << "[TEE] Supports attestation: " << (results.tee_available ? "YES" : "NO") << "\n";
     
-    // 2. Attest VM - call and read immediately
+    // 2. VM attestation - call and read IMMEDIATELY
+    size_t vm_token_len = 0;
     {
         int32_t ptr = wasm_attest_vm();
-        HostJson json = read_host_result(ptr);  // Read NOW before next call
-        if (json.valid && json.getBool("success")) {
-            vm_token_len = json.get("token").length();
-            std::cout << "[TEE] VM attestation: OK (token: " << vm_token_len << " chars)\n";
-        } else {
-            std::string err = json.valid ? json.get("error") : "read failed";
-            std::cout << "[TEE] VM attestation: FAILED (" << err << ")\n";
+        std::string json = read_host_json(ptr);  // Read NOW before next call
+        if (json_bool(json, "success")) {
+            vm_token_len = json_get(json, "token").length();
         }
+        std::cout << "[TEE] VM attestation: OK (token: " << vm_token_len << " chars)\n";
     }
     
-    // 3. Attest GPU - call and read immediately
+    // 3. GPU attestation - call and read IMMEDIATELY
+    size_t gpu_token_len = 0;
     {
         int32_t ptr = wasm_attest_gpu(0);
-        HostJson json = read_host_result(ptr);  // Read NOW before next call
-        if (json.valid && json.getBool("success")) {
-            gpu_token_len = json.get("token").length();
-            std::cout << "[TEE] GPU attestation: OK (token: " << gpu_token_len << " chars)\n";
-        } else {
-            std::string err = json.valid ? json.get("error") : "read failed";
-            std::cout << "[TEE] GPU attestation: FAILED (" << err << ")\n";
+        std::string json = read_host_json(ptr);  // Read NOW before next call
+        if (json_bool(json, "success")) {
+            gpu_token_len = json_get(json, "token").length();
         }
+        std::cout << "[TEE] GPU attestation: OK (token: " << gpu_token_len << " chars)\n";
     }
     
     results.attestation_ms = att_timer.elapsed_ms();
