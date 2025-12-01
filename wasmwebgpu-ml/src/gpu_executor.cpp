@@ -22,26 +22,15 @@ namespace ml {
 GpuExecutor::GpuExecutor() : available_(false) {
     std::cerr << "[wasi:gpu] Initializing GPU executor..." << std::endl;
     
-    // Query device info from host
-    char name[256] = {0};
-    char backend[64] = {0};
-    char compute_cap[32] = {0};
-    uint64_t total_memory = 0;
-    uint32_t is_hardware = 0;
+    // Query device info from host using the wrapper function
+    wasi_gpu_device_info_t info = {0};
+    wasi_gpu_get_device_info(&info);
     
-    wasi_gpu_get_device_info(
-        name, sizeof(name),
-        backend, sizeof(backend),
-        &total_memory,
-        &is_hardware,
-        compute_cap, sizeof(compute_cap)
-    );
-    
-    device_info_.name = name;
-    device_info_.backend = backend;
-    device_info_.total_memory = total_memory;
-    device_info_.is_hardware = (is_hardware != 0);
-    device_info_.compute_capability = compute_cap;
+    device_info_.name = info.name;
+    device_info_.backend = info.backend;
+    device_info_.total_memory = info.total_memory;
+    device_info_.is_hardware = (info.is_hardware != 0);
+    device_info_.compute_capability = info.compute_capability;
     
     // Check if we got valid device info
     if (!device_info_.name.empty() && device_info_.total_memory > 0) {
