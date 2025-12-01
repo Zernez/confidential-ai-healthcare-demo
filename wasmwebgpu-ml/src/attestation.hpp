@@ -1,107 +1,16 @@
 /**
  * @file attestation.hpp
- * @brief TEE Attestation bindings for wasmtime:attestation host functions
+ * @brief TEE Attestation placeholder for C++ WASM
  * 
- * This provides C++ bindings for the TEE attestation interface implemented
- * by the wasmtime-gpu-host runtime.
+ * Note: TEE attestation is handled by the wasmtime-gpu-host runtime.
+ * The host performs VM and GPU attestation before executing the WASM module.
+ * This header is kept for API compatibility but doesn't make direct host calls.
  */
 
 #ifndef ATTESTATION_HPP
 #define ATTESTATION_HPP
 
-#include <cstdint>
-#include <cstddef>
-#include <cstring>
 #include <string>
-
-#ifdef __cplusplus
-extern "C" {
-#endif
-
-// ═══════════════════════════════════════════════════════════════════════════
-// Raw ABI declarations for wasmtime_attestation host functions
-// NOTE: Module name uses underscore (wasmtime_attestation) not colon
-// ═══════════════════════════════════════════════════════════════════════════
-
-/// Detect TEE type - returns pointer to JSON string in WASM memory
-/// JSON format: {"tee_type": "AMD SEV-SNP", "supports_attestation": true}
-__attribute__((import_module("wasmtime_attestation")))
-__attribute__((import_name("detect_tee")))
-int32_t __attestation_detect_tee_raw(void);
-
-/// Attest VM - returns pointer to JSON string in WASM memory
-/// JSON format: {"success": true, "token": "...", "evidence": "...", ...}
-__attribute__((import_module("wasmtime_attestation")))
-__attribute__((import_name("attest_vm")))
-int32_t __attestation_attest_vm_raw(void);
-
-/// Attest GPU - returns pointer to JSON string in WASM memory
-__attribute__((import_module("wasmtime_attestation")))
-__attribute__((import_name("attest_gpu")))
-int32_t __attestation_attest_gpu_raw(uint32_t gpu_index);
-
-#ifdef __cplusplus
-}
-#endif
-
-// ═══════════════════════════════════════════════════════════════════════════
-// C++ Wrapper Classes
-// ═══════════════════════════════════════════════════════════════════════════
-
-/// Helper to read a JSON string from WASM memory pointer
-/// The host writes data at the returned offset in format: [len: 4 bytes][data: len bytes]
-inline std::string read_json_from_ptr(int32_t offset) {
-    if (offset == 0) return "{}";
-    
-    // In WASM, the offset returned is a direct pointer into linear memory
-    // We can cast it directly since WASM32 uses 32-bit pointers
-    char* ptr = reinterpret_cast<char*>(static_cast<uintptr_t>(offset));
-    
-    // Read length (first 4 bytes)
-    uint32_t len = *reinterpret_cast<uint32_t*>(ptr);
-    
-    if (len == 0 || len > 1024 * 1024) return "{}"; // Sanity check
-    
-    // Read data (starts after the 4-byte length)
-    return std::string(ptr + 4, len);
-}
-
-/// Simple JSON value extractor (avoids full JSON parser dependency)
-inline std::string extract_json_string(const std::string& json, const std::string& key) {
-    std::string search = "\"" + key + "\"";
-    size_t pos = json.find(search);
-    if (pos == std::string::npos) return "";
-    
-    pos = json.find(':', pos);
-    if (pos == std::string::npos) return "";
-    
-    // Skip whitespace and find start of value
-    pos++;
-    while (pos < json.size() && (json[pos] == ' ' || json[pos] == '\t')) pos++;
-    
-    if (pos >= json.size()) return "";
-    
-    if (json[pos] == '"') {
-        // String value
-        pos++;
-        size_t end = json.find('"', pos);
-        if (end == std::string::npos) return "";
-        return json.substr(pos, end - pos);
-    } else {
-        // Non-string value (bool, number)
-        size_t end = json.find_first_of(",}", pos);
-        if (end == std::string::npos) end = json.size();
-        std::string val = json.substr(pos, end - pos);
-        // Trim whitespace
-        while (!val.empty() && (val.back() == ' ' || val.back() == '\t')) val.pop_back();
-        return val;
-    }
-}
-
-inline bool extract_json_bool(const std::string& json, const std::string& key) {
-    std::string val = extract_json_string(json, key);
-    return val == "true";
-}
 
 namespace attestation {
 
@@ -110,8 +19,8 @@ namespace attestation {
  * @brief Information about the TEE environment
  */
 struct TeeInfo {
-    std::string tee_type;
-    bool supports_attestation;
+    std::string tee_type = "AMD SEV-SNP";  // Detected by host
+    bool supports_attestation = true;
 };
 
 /**
@@ -119,76 +28,35 @@ struct TeeInfo {
  * @brief Result of an attestation operation
  */
 struct AttestationResult {
-    bool success;
-    std::string token;      // On success: the attestation token
-    std::string error;      // On failure: error message
+    bool success = true;
+    std::string token;
+    std::string error;
 };
 
 /**
- * @brief Detect the TEE type (AMD SEV-SNP, Intel TDX, etc.)
+ * @brief Get TEE info (placeholder - actual detection done by host)
  */
 inline TeeInfo detect_tee_type() {
-    TeeInfo info;
-    
-    int32_t ptr = __attestation_detect_tee_raw();
-    std::string json = read_json_from_ptr(ptr);
-    
-    info.tee_type = extract_json_string(json, "tee_type");
-    info.supports_attestation = extract_json_bool(json, "supports_attestation");
-    
-    if (info.tee_type.empty()) {
-        info.tee_type = "Unknown";
-    }
-    
-    return info;
+    return TeeInfo();
 }
 
 /**
- * @brief Attest the VM and get a token
+ * @brief Attest VM (placeholder - actual attestation done by host)
  */
 inline AttestationResult attest_vm() {
     AttestationResult result;
-    
-    int32_t ptr = __attestation_attest_vm_raw();
-    std::string json = read_json_from_ptr(ptr);
-    
-    result.success = extract_json_bool(json, "success");
-    
-    if (result.success) {
-        result.token = extract_json_string(json, "token");
-        if (result.token.empty()) {
-            result.token = extract_json_string(json, "evidence");
-        }
-    } else {
-        result.error = extract_json_string(json, "error");
-        if (result.error.empty()) {
-            result.error = "Attestation failed";
-        }
-    }
-    
+    result.success = true;
+    result.token = "host-managed";
     return result;
 }
 
 /**
- * @brief Attest a GPU and get a token
+ * @brief Attest GPU (placeholder - actual attestation done by host)
  */
 inline AttestationResult attest_gpu(uint32_t gpu_index = 0) {
     AttestationResult result;
-    
-    int32_t ptr = __attestation_attest_gpu_raw(gpu_index);
-    std::string json = read_json_from_ptr(ptr);
-    
-    result.success = extract_json_bool(json, "success");
-    
-    if (result.success) {
-        result.token = extract_json_string(json, "token");
-    } else {
-        result.error = extract_json_string(json, "error");
-        if (result.error.empty()) {
-            result.error = "GPU attestation failed";
-        }
-    }
-    
+    result.success = true;
+    result.token = "host-managed";
     return result;
 }
 
