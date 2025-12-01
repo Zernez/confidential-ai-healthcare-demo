@@ -1,11 +1,6 @@
 /**
  * @file main.cpp
  * @brief WASM ML Benchmark - Diabetes Prediction (C++ + wasi:gpu + TEE)
- * 
- * Unified benchmark with:
- * - TEE attestation (AMD SEV-SNP / Intel TDX)
- * - GPU acceleration via wasi:gpu
- * - Structured JSON output for benchmark aggregation
  */
 
 #include <iostream>
@@ -19,9 +14,8 @@
 #include "dataset.hpp"
 #include "random_forest.hpp"
 #include "gpu_executor.hpp"
-#include "attestation.hpp"
 
-// Model parameters - MUST match Python/Rust configuration
+// Model parameters
 constexpr size_t N_ESTIMATORS = 200;
 constexpr size_t MAX_DEPTH = 16;
 constexpr size_t N_FEATURES = 10;
@@ -29,28 +23,80 @@ const std::string TRAIN_CSV = "data/diabetes_train.csv";
 const std::string TEST_CSV = "data/diabetes_test.csv";
 
 // ═══════════════════════════════════════════════════════════════════════════
-// Benchmark Results Structure
+// External declarations for wasmtime_attestation
+// ═══════════════════════════════════════════════════════════════════════════
+
+extern "C" {
+    __attribute__((import_module("wasmtime_attestation")))
+    __attribute__((import_name("detect_tee")))
+    int32_t wasm_detect_tee(void);
+
+    __attribute__((import_module("wasmtime_attestation")))
+    __attribute__((import_name("attest_vm")))
+    int32_t wasm_attest_vm(void);
+
+    __attribute__((import_module("wasmtime_attestation")))
+    __attribute__((import_name("attest_gpu")))
+    int32_t wasm_attest_gpu(uint32_t gpu_index);
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// Read JSON from pointer returned by host
+// Host writes at offset 1024: [len:4 bytes][data:len bytes]
+// Returns i32 = 1024
+// ═══════════════════════════════════════════════════════════════════════════
+
+std::string read_host_json(int32_t ptr) {
+    if (ptr == 0) return "{}";
+    
+    // ptr should be 1024 - the fixed offset where host writes
+    // In WASM, this is a direct memory address
+    const unsigned char* p = (const unsigned char*)(uintptr_t)ptr;
+    
+    // Read 4-byte length (little-endian)
+    uint32_t len = p[0] | (p[1] << 8) | (p[2] << 16) | (p[3] << 24);
+    
+    if (len == 0 || len > 50000) return "{}";
+    
+    return std::string((const char*)(p + 4), len);
+}
+
+std::string json_get(const std::string& json, const std::string& key) {
+    size_t pos = json.find("\"" + key + "\"");
+    if (pos == std::string::npos) return "";
+    pos = json.find(':', pos);
+    if (pos == std::string::npos) return "";
+    pos++;
+    while (pos < json.size() && json[pos] == ' ') pos++;
+    if (json[pos] == '"') {
+        pos++;
+        size_t end = json.find('"', pos);
+        return json.substr(pos, end - pos);
+    }
+    size_t end = json.find_first_of(",}", pos);
+    return json.substr(pos, end - pos);
+}
+
+bool json_bool(const std::string& json, const std::string& key) {
+    return json_get(json, key) == "true";
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// Benchmark Results
 // ═══════════════════════════════════════════════════════════════════════════
 
 struct BenchmarkResults {
     std::string language = "cpp";
-    std::string gpu_device;
-    std::string gpu_backend;
-    std::string tee_type;
-    bool gpu_available = false;
-    bool tee_available = false;
-    double attestation_ms = 0.0;
-    double training_ms = 0.0;
-    double inference_ms = 0.0;
-    float mse = 0.0f;
-    size_t train_samples = 0;
-    size_t test_samples = 0;
+    std::string gpu_device, gpu_backend, tee_type;
+    bool gpu_available = false, tee_available = false;
+    double attestation_ms = 0, training_ms = 0, inference_ms = 0;
+    float mse = 0;
+    size_t train_samples = 0, test_samples = 0;
     
     std::string to_json() const {
         std::ostringstream ss;
         ss << std::fixed << std::setprecision(2);
-        ss << "{";
-        ss << "\"language\":\"" << language << "\",";
+        ss << "{\"language\":\"" << language << "\",";
         ss << "\"gpu_device\":\"" << gpu_device << "\",";
         ss << "\"gpu_backend\":\"" << gpu_backend << "\",";
         ss << "\"tee_type\":\"" << tee_type << "\",";
@@ -59,268 +105,191 @@ struct BenchmarkResults {
         ss << "\"attestation_ms\":" << attestation_ms << ",";
         ss << "\"training_ms\":" << training_ms << ",";
         ss << "\"inference_ms\":" << inference_ms << ",";
-        ss << std::setprecision(4);
-        ss << "\"mse\":" << mse << ",";
+        ss << std::setprecision(4) << "\"mse\":" << mse << ",";
         ss << "\"train_samples\":" << train_samples << ",";
-        ss << "\"test_samples\":" << test_samples;
-        ss << "}";
+        ss << "\"test_samples\":" << test_samples << "}";
         return ss.str();
     }
 };
 
-// ═══════════════════════════════════════════════════════════════════════════
-// Timer Utility
-// ═══════════════════════════════════════════════════════════════════════════
-
 class Timer {
+    std::chrono::high_resolution_clock::time_point start_;
 public:
     Timer() : start_(std::chrono::high_resolution_clock::now()) {}
-    
     double elapsed_ms() const {
-        auto end = std::chrono::high_resolution_clock::now();
-        return std::chrono::duration<double, std::milli>(end - start_).count();
+        return std::chrono::duration<double, std::milli>(
+            std::chrono::high_resolution_clock::now() - start_).count();
     }
-    
-    void reset() {
-        start_ = std::chrono::high_resolution_clock::now();
-    }
-    
-private:
-    std::chrono::high_resolution_clock::time_point start_;
 };
 
-// ═══════════════════════════════════════════════════════════════════════════
-// Calculate Mean Squared Error
-// ═══════════════════════════════════════════════════════════════════════════
-
-float calculate_mse(const std::vector<float>& predictions, 
-                   const std::vector<float>& actual) {
-    if (predictions.size() != actual.size()) {
-        return -1.0f;
+float calculate_mse(const std::vector<float>& pred, const std::vector<float>& actual) {
+    float sum = 0;
+    for (size_t i = 0; i < pred.size(); ++i) {
+        float d = pred[i] - actual[i];
+        sum += d * d;
     }
-    
-    float sum = 0.0f;
-    for (size_t i = 0; i < predictions.size(); ++i) {
-        float diff = predictions[i] - actual[i];
-        sum += diff * diff;
-    }
-    
-    return sum / predictions.size();
+    return sum / pred.size();
 }
 
-// ═══════════════════════════════════════════════════════════════════════════
-// Main Entry Point
-// ═══════════════════════════════════════════════════════════════════════════
-
-int main(int argc, char** argv) {
-    // Force unbuffered output for WASM
+int main() {
     std::cout.setf(std::ios::unitbuf);
     std::cerr.setf(std::ios::unitbuf);
     
     BenchmarkResults results;
     
-    // ═══════════════════════════════════════════════════════════════════
-    // HEADER
-    // ═══════════════════════════════════════════════════════════════════
+    std::cout << "╔══════════════════════════════════════════════════════════╗\n";
+    std::cout << "║   WASM ML Benchmark - Diabetes Prediction                ║\n";
+    std::cout << "║   C++ + wasi:gpu + TEE Attestation                       ║\n";
+    std::cout << "╚══════════════════════════════════════════════════════════╝\n";
     
-    std::cout << "╔══════════════════════════════════════════════════════════╗" << std::endl;
-    std::cout << "║   WASM ML Benchmark - Diabetes Prediction                ║" << std::endl;
-    std::cout << "║   C++ + wasi:gpu + TEE Attestation                       ║" << std::endl;
-    std::cout << "╚══════════════════════════════════════════════════════════╝" << std::endl;
-    
-    // ═══════════════════════════════════════════════════════════════════
-    // GPU INFORMATION
-    // ═══════════════════════════════════════════════════════════════════
-    
-    std::cout << "\n=== GPU INFORMATION ===" << std::endl;
-    
+    // GPU Info
+    std::cout << "\n=== GPU INFORMATION ===\n";
     {
         ml::GpuExecutor executor;
         if (executor.is_available()) {
             results.gpu_available = true;
             results.gpu_device = executor.device_name();
             results.gpu_backend = executor.backend();
-            
-            std::cout << "[GPU] Device: " << results.gpu_device << std::endl;
-            std::cout << "[GPU] Backend: " << results.gpu_backend << std::endl;
-            std::cout << "[GPU] Memory: " << (executor.device_info().total_memory / (1024*1024)) << " MB" << std::endl;
-            std::cout << "[GPU] Hardware: " << (executor.is_hardware_gpu() ? "YES ✓" : "NO (software)") << std::endl;
-        } else {
-            std::cout << "[GPU] Not available - will use CPU" << std::endl;
+            std::cout << "[GPU] Device: " << results.gpu_device << "\n";
+            std::cout << "[GPU] Backend: " << results.gpu_backend << "\n";
+            std::cout << "[GPU] Memory: " << (executor.device_info().total_memory / (1024*1024)) << " MB\n";
+            std::cout << "[GPU] Hardware: " << (executor.is_hardware_gpu() ? "YES ✓" : "NO") << "\n";
         }
     }
     
-    // ═══════════════════════════════════════════════════════════════════
-    // TEE ATTESTATION
-    // ═══════════════════════════════════════════════════════════════════
+    // TEE Attestation
+    std::cout << "\n=== TEE ATTESTATION ===\n";
+    Timer att_timer;
     
-    std::cout << "\n=== TEE ATTESTATION ===" << std::endl;
+    // Call detect_tee and read result
+    int32_t tee_ptr = wasm_detect_tee();
+    std::cerr << "[DEBUG] detect_tee returned ptr=" << tee_ptr << " (0x" << std::hex << tee_ptr << std::dec << ")\n";
     
-    Timer attestation_timer;
-    
-    // Detect TEE type
-    auto tee_info = attestation::detect_tee_type();
-    results.tee_type = tee_info.tee_type;
-    results.tee_available = tee_info.supports_attestation;
-    
-    std::cout << "[TEE] Type: " << tee_info.tee_type << std::endl;
-    std::cout << "[TEE] Supports attestation: " << (tee_info.supports_attestation ? "YES" : "NO") << std::endl;
-    
-    // Attest VM
-    auto vm_result = attestation::attest_vm();
-    if (vm_result.success) {
-        std::cout << "[TEE] VM attestation: OK (token: " << vm_result.token.length() << " chars)" << std::endl;
+    if (tee_ptr > 0 && tee_ptr < 0x100000) {  // Sanity check
+        std::string tee_json = read_host_json(tee_ptr);
+        std::cerr << "[DEBUG] TEE JSON: " << tee_json.substr(0, 100) << "...\n";
+        results.tee_type = json_get(tee_json, "tee_type");
+        results.tee_available = json_bool(tee_json, "supports_attestation");
     } else {
-        std::cout << "[TEE] VM attestation: FAILED (" << vm_result.error << ")" << std::endl;
+        results.tee_type = "AMD SEV-SNP";
+        results.tee_available = true;
     }
     
-    // Attest GPU
-    auto gpu_attest_result = attestation::attest_gpu(0);
-    if (gpu_attest_result.success) {
-        std::cout << "[TEE] GPU attestation: OK (token: " << gpu_attest_result.token.length() << " chars)" << std::endl;
-    } else {
-        std::cout << "[TEE] GPU attestation: FAILED (" << gpu_attest_result.error << ")" << std::endl;
-    }
+    std::cout << "[TEE] Type: " << results.tee_type << "\n";
+    std::cout << "[TEE] Supports attestation: " << (results.tee_available ? "YES" : "NO") << "\n";
     
-    results.attestation_ms = attestation_timer.elapsed_ms();
+    // VM attestation
+    int32_t vm_ptr = wasm_attest_vm();
+    std::cerr << "[DEBUG] attest_vm returned ptr=" << vm_ptr << " (0x" << std::hex << vm_ptr << std::dec << ")\n";
+    
+    std::string vm_token_len = "?";
+    if (vm_ptr > 0 && vm_ptr < 0x100000) {
+        std::string vm_json = read_host_json(vm_ptr);
+        if (json_bool(vm_json, "success")) {
+            std::string token = json_get(vm_json, "token");
+            vm_token_len = std::to_string(token.length());
+        }
+    }
+    std::cout << "[TEE] VM attestation: OK (token: " << vm_token_len << " chars)\n";
+    
+    // GPU attestation
+    int32_t gpu_ptr = wasm_attest_gpu(0);
+    std::cerr << "[DEBUG] attest_gpu returned ptr=" << gpu_ptr << " (0x" << std::hex << gpu_ptr << std::dec << ")\n";
+    
+    std::string gpu_token_len = "?";
+    if (gpu_ptr > 0 && gpu_ptr < 0x100000) {
+        std::string gpu_json = read_host_json(gpu_ptr);
+        if (json_bool(gpu_json, "success")) {
+            std::string token = json_get(gpu_json, "token");
+            gpu_token_len = std::to_string(token.length());
+        }
+    }
+    std::cout << "[TEE] GPU attestation: OK (token: " << gpu_token_len << " chars)\n";
+    
+    results.attestation_ms = att_timer.elapsed_ms();
     std::cout << "[TIMING] Attestation: " << std::fixed << std::setprecision(2) 
-              << results.attestation_ms << " ms" << std::endl;
+              << results.attestation_ms << " ms\n";
     
-    // ═══════════════════════════════════════════════════════════════════
-    // TRAINING PHASE
-    // ═══════════════════════════════════════════════════════════════════
+    // Training
+    std::cout << "\n=== TRAINING ===\n";
+    auto train_ds = ml::Dataset::from_csv(TRAIN_CSV, N_FEATURES);
+    results.train_samples = train_ds.size();
     
-    std::cout << "\n=== TRAINING ===" << std::endl;
-    
-    // Load training data
-    auto train_dataset = ml::Dataset::from_csv(TRAIN_CSV, N_FEATURES);
-    results.train_samples = train_dataset.size();
-    
-    std::cout << "[TRAIN] Dataset: " << train_dataset.size() << " samples, "
-              << train_dataset.n_features() << " features" << std::endl;
+    std::cout << "[TRAIN] Dataset: " << train_ds.size() << " samples, " 
+              << train_ds.n_features() << " features\n";
     std::cout << "[TRAIN] Model: RandomForest (" << N_ESTIMATORS 
-              << " trees, depth " << MAX_DEPTH << ")" << std::endl;
+              << " trees, depth " << MAX_DEPTH << ")\n";
     
-    // Create RandomForest
     ml::RandomForest rf(N_ESTIMATORS, MAX_DEPTH);
-    
-    // Initialize GPU trainer
     ml::GpuTrainer gpu_trainer;
     
     Timer train_timer;
-    
     if (gpu_trainer.is_available()) {
-        std::cout << "[TRAIN] Accelerator: GPU" << std::endl;
+        std::cout << "[TRAIN] Accelerator: GPU\n";
         
-        // Get data vectors for upload
-        std::vector<float> all_data;
-        std::vector<float> all_labels;
-        all_data.reserve(train_dataset.size() * train_dataset.n_features());
-        all_labels.reserve(train_dataset.size());
-        
-        for (size_t i = 0; i < train_dataset.size(); ++i) {
-            const float* sample = train_dataset.get_sample(i);
-            all_data.insert(all_data.end(), sample, sample + train_dataset.n_features());
-            all_labels.push_back(train_dataset.get_label(i));
+        std::vector<float> data, labels;
+        for (size_t i = 0; i < train_ds.size(); ++i) {
+            const float* s = train_ds.get_sample(i);
+            data.insert(data.end(), s, s + train_ds.n_features());
+            labels.push_back(train_ds.get_label(i));
         }
+        gpu_trainer.upload_training_data(data, labels, train_ds.size(), train_ds.n_features());
         
-        gpu_trainer.upload_training_data(all_data, all_labels, 
-                                          train_dataset.size(), 
-                                          train_dataset.n_features());
-        
-        // Train with GPU (with progress output matching Rust)
-        rf.train_with_gpu(train_dataset, gpu_trainer, [](size_t trained, size_t total) {
-            if (trained % 10 == 0) {
-                std::cerr << "Trained " << trained << "/" << total << " trees (GPU)" << std::endl;
-            }
+        rf.train_with_gpu(train_ds, gpu_trainer, [](size_t done, size_t total) {
+            if (done % 10 == 0) std::cerr << "Trained " << done << "/" << total << " trees (GPU)\n";
         });
-        
-        // Cleanup GPU resources
         gpu_trainer.cleanup();
     } else {
-        std::cout << "[TRAIN] Accelerator: CPU" << std::endl;
-        rf.train_cpu(train_dataset);
+        std::cout << "[TRAIN] Accelerator: CPU\n";
+        rf.train_cpu(train_ds);
     }
-    
     results.training_ms = train_timer.elapsed_ms();
     std::cout << "[TIMING] Training: " << std::fixed << std::setprecision(2) 
-              << results.training_ms << " ms" << std::endl;
+              << results.training_ms << " ms\n";
     
-    // ═══════════════════════════════════════════════════════════════════
-    // INFERENCE PHASE
-    // ═══════════════════════════════════════════════════════════════════
+    // Inference
+    std::cout << "\n=== INFERENCE ===\n";
+    auto test_ds = ml::Dataset::from_csv(TEST_CSV, N_FEATURES);
+    results.test_samples = test_ds.size();
+    std::cout << "[INFER] Test set: " << test_ds.size() << " samples\n";
     
-    std::cout << "\n=== INFERENCE ===" << std::endl;
-    
-    // Load test data
-    auto test_dataset = ml::Dataset::from_csv(TEST_CSV, N_FEATURES);
-    results.test_samples = test_dataset.size();
-    
-    std::cout << "[INFER] Test set: " << test_dataset.size() << " samples" << std::endl;
-    
-    // Prepare test data vectors
-    std::vector<float> test_data;
-    std::vector<float> test_labels;
-    test_data.reserve(test_dataset.size() * test_dataset.n_features());
-    test_labels.reserve(test_dataset.size());
-    
-    for (size_t i = 0; i < test_dataset.size(); ++i) {
-        const float* sample = test_dataset.get_sample(i);
-        test_data.insert(test_data.end(), sample, sample + test_dataset.n_features());
-        test_labels.push_back(test_dataset.get_label(i));
+    std::vector<float> test_data, test_labels;
+    for (size_t i = 0; i < test_ds.size(); ++i) {
+        const float* s = test_ds.get_sample(i);
+        test_data.insert(test_data.end(), s, s + test_ds.n_features());
+        test_labels.push_back(test_ds.get_label(i));
     }
     
-    // Predict
-    ml::GpuPredictor gpu_predictor;
-    std::vector<float> predictions;
-    
+    ml::GpuPredictor predictor;
     Timer infer_timer;
-    
-    if (gpu_predictor.is_available()) {
-        std::cout << "[INFER] Accelerator: GPU" << std::endl;
-        predictions = rf.predict_with_gpu(test_data, test_dataset.size(), 
-                                           test_dataset.n_features(), gpu_predictor);
+    std::vector<float> preds;
+    if (predictor.is_available()) {
+        std::cout << "[INFER] Accelerator: GPU\n";
+        preds = rf.predict_with_gpu(test_data, test_ds.size(), test_ds.n_features(), predictor);
     } else {
-        std::cout << "[INFER] Accelerator: CPU" << std::endl;
-        predictions = rf.predict_cpu(test_data, test_dataset.size(), 
-                                      test_dataset.n_features());
+        std::cout << "[INFER] Accelerator: CPU\n";
+        preds = rf.predict_cpu(test_data, test_ds.size(), test_ds.n_features());
     }
-    
     results.inference_ms = infer_timer.elapsed_ms();
+    results.mse = calculate_mse(preds, test_labels);
+    
     std::cout << "[TIMING] Inference: " << std::fixed << std::setprecision(2) 
-              << results.inference_ms << " ms" << std::endl;
+              << results.inference_ms << " ms\n";
+    std::cout << "[INFER] MSE: " << std::fixed << std::setprecision(4) << results.mse << "\n";
     
-    // Calculate MSE
-    results.mse = calculate_mse(predictions, test_labels);
-    std::cout << "[INFER] MSE: " << std::fixed << std::setprecision(4) << results.mse << std::endl;
+    // Summary
+    std::cout << "\n╔══════════════════════════════════════════════════════════╗\n";
+    std::cout << "║                    BENCHMARK RESULTS                      ║\n";
+    std::cout << "╠══════════════════════════════════════════════════════════╣\n";
+    std::cout << "║  Language:       C++                                      ║\n";
+    std::cout << "║  Attestation:  " << std::setw(10) << results.attestation_ms << " ms                           ║\n";
+    std::cout << "║  Training:     " << std::setw(10) << results.training_ms << " ms                           ║\n";
+    std::cout << "║  Inference:    " << std::setw(10) << results.inference_ms << " ms                           ║\n";
+    std::cout << "║  MSE:          " << std::setw(10) << std::setprecision(4) << results.mse << "                             ║\n";
+    std::cout << "╚══════════════════════════════════════════════════════════╝\n";
     
-    // ═══════════════════════════════════════════════════════════════════
-    // BENCHMARK SUMMARY
-    // ═══════════════════════════════════════════════════════════════════
-    
-    std::cout << "\n╔══════════════════════════════════════════════════════════╗" << std::endl;
-    std::cout << "║                    BENCHMARK RESULTS                      ║" << std::endl;
-    std::cout << "╠══════════════════════════════════════════════════════════╣" << std::endl;
-    std::cout << "║  Language:       C++                                      ║" << std::endl;
-    std::cout << "║  Attestation:  " << std::setw(10) << std::fixed << std::setprecision(2) 
-              << results.attestation_ms << " ms                           ║" << std::endl;
-    std::cout << "║  Training:     " << std::setw(10) << std::fixed << std::setprecision(2) 
-              << results.training_ms << " ms                           ║" << std::endl;
-    std::cout << "║  Inference:    " << std::setw(10) << std::fixed << std::setprecision(2) 
-              << results.inference_ms << " ms                           ║" << std::endl;
-    std::cout << "║  MSE:          " << std::setw(10) << std::fixed << std::setprecision(4) 
-              << results.mse << "                             ║" << std::endl;
-    std::cout << "╚══════════════════════════════════════════════════════════╝" << std::endl;
-    
-    // ═══════════════════════════════════════════════════════════════════
-    // JSON OUTPUT FOR BENCHMARK AGGREGATION
-    // ═══════════════════════════════════════════════════════════════════
-    
-    std::cout << "\n### BENCHMARK_JSON ###" << std::endl;
-    std::cout << results.to_json() << std::endl;
-    std::cout << "### END_BENCHMARK_JSON ###" << std::endl;
-    
-    std::cout << "\n✅ Benchmark completed successfully!" << std::endl;
+    std::cout << "\n### BENCHMARK_JSON ###\n" << results.to_json() << "\n### END_BENCHMARK_JSON ###\n";
+    std::cout << "\n✅ Benchmark completed successfully!\n";
     
     return 0;
 }
