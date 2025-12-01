@@ -49,11 +49,7 @@ extern "C" {
 uint32_t get_json_len(int32_t ptr) {
     if (ptr == 0 || ptr < 0) return 0;
     const unsigned char* p = (const unsigned char*)(uintptr_t)ptr;
-    uint32_t len = p[0] | (p[1] << 8) | (p[2] << 16) | (p[3] << 24);
-    std::cerr << "[DEBUG] get_json_len: ptr=" << ptr << " bytes=[" 
-              << (int)p[0] << "," << (int)p[1] << "," << (int)p[2] << "," << (int)p[3] 
-              << "] len=" << len << std::endl;
-    return len;
+    return p[0] | (p[1] << 8) | (p[2] << 16) | (p[3] << 24);
 }
 
 // Check if JSON contains "success":true

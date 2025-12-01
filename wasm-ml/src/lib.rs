@@ -178,6 +178,39 @@ pub fn get_gpu_info() -> Result<String, String> {
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
+// Component Model ABI - cabi_realloc
+// Required for host to allocate memory in the guest
+// ═══════════════════════════════════════════════════════════════════════════
+
+#[cfg(target_arch = "wasm32")]
+#[no_mangle]
+pub unsafe extern "C" fn cabi_realloc(
+    old_ptr: *mut u8,
+    old_size: usize,
+    align: usize,
+    new_size: usize,
+) -> *mut u8 {
+    use std::alloc::{alloc, dealloc, realloc, Layout};
+    
+    if new_size == 0 {
+        if !old_ptr.is_null() && old_size > 0 {
+            let layout = Layout::from_size_align_unchecked(old_size, align);
+            dealloc(old_ptr, layout);
+        }
+        return std::ptr::null_mut();
+    }
+    
+    let new_layout = Layout::from_size_align_unchecked(new_size, align);
+    
+    if old_ptr.is_null() || old_size == 0 {
+        alloc(new_layout)
+    } else {
+        let old_layout = Layout::from_size_align_unchecked(old_size, align);
+        realloc(old_ptr, old_layout, new_size)
+    }
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
 // Component Model Exports
 // ═══════════════════════════════════════════════════════════════════════════
 

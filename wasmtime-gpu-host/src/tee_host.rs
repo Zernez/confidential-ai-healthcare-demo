@@ -824,8 +824,74 @@ pub trait AsTeeHost {
     fn as_tee_host(&self) -> &TeeHost;
 }
 
-/// Helper: Write string to WASM memory
+/// Helper: Write string to WASM memory using cabi_realloc
+/// This allocates memory in the guest using the Component Model ABI
 fn write_string_to_wasm<T>(caller: &mut Caller<'_, T>, s: &str) -> i32 {
+    let bytes = s.as_bytes();
+    let total_len = 4 + bytes.len();  // 4 bytes for length + data
+    
+    // Try to get cabi_realloc from the guest
+    let cabi_realloc = match caller.get_export("cabi_realloc") {
+        Some(wasmtime::Extern::Func(func)) => func,
+        _ => {
+            // Fallback: use fixed offset if cabi_realloc not available
+            debug!("cabi_realloc not found, using fixed offset");
+            return write_string_to_wasm_fixed(caller, s);
+        }
+    };
+    
+    // Call cabi_realloc(old_ptr=0, old_size=0, align=1, new_size=total_len)
+    let params = [
+        wasmtime::Val::I32(0),           // old_ptr
+        wasmtime::Val::I32(0),           // old_size  
+        wasmtime::Val::I32(1),           // align
+        wasmtime::Val::I32(total_len as i32),  // new_size
+    ];
+    let mut results = [wasmtime::Val::I32(0)];
+    
+    if let Err(e) = cabi_realloc.call(&mut *caller, &params, &mut results) {
+        error!("cabi_realloc call failed: {}", e);
+        return write_string_to_wasm_fixed(caller, s);
+    }
+    
+    let ptr = match results[0] {
+        wasmtime::Val::I32(p) => p as usize,
+        _ => {
+            error!("cabi_realloc returned unexpected type");
+            return write_string_to_wasm_fixed(caller, s);
+        }
+    };
+    
+    if ptr == 0 {
+        error!("cabi_realloc returned null");
+        return write_string_to_wasm_fixed(caller, s);
+    }
+    
+    // Get memory and write data
+    let memory = match caller.get_export("memory") {
+        Some(wasmtime::Extern::Memory(mem)) => mem,
+        _ => {
+            error!("Failed to get WASM memory export");
+            return 0;
+        }
+    };
+    
+    let data = memory.data_mut(caller);
+    if data.len() < ptr + total_len {
+        error!("WASM memory too small after cabi_realloc");
+        return 0;
+    }
+    
+    // Write: [len: 4 bytes][data: len bytes]
+    data[ptr..ptr+4].copy_from_slice(&(bytes.len() as u32).to_le_bytes());
+    data[ptr+4..ptr+4+bytes.len()].copy_from_slice(bytes);
+    
+    debug!("Allocated {} bytes at offset {} via cabi_realloc", total_len, ptr);
+    ptr as i32
+}
+
+/// Fallback: Write to fixed offset (for modules without cabi_realloc)
+fn write_string_to_wasm_fixed<T>(caller: &mut Caller<'_, T>, s: &str) -> i32 {
     let memory = match caller.get_export("memory") {
         Some(wasmtime::Extern::Memory(mem)) => mem,
         _ => {
@@ -837,13 +903,12 @@ fn write_string_to_wasm<T>(caller: &mut Caller<'_, T>, s: &str) -> i32 {
     let bytes = s.as_bytes();
     let len = bytes.len();
     
-    // Write: [len: 4 bytes][data: len bytes] at a high fixed offset
-    // Using 1MB offset to avoid conflicts with stack/heap at low addresses
+    // Use high fixed offset to avoid conflicts
     let offset = 1048576;  // 1MB
     
     let data = memory.data_mut(caller);
     if data.len() < offset + len + 8 {
-        error!("WASM memory too small for attestation response (need {} bytes at offset {})", len + 8, offset);
+        error!("WASM memory too small for attestation response");
         return 0;
     }
     
