@@ -49,19 +49,24 @@ int32_t __attestation_attest_gpu_raw(uint32_t gpu_index);
 // ═══════════════════════════════════════════════════════════════════════════
 
 /// Helper to read a JSON string from WASM memory pointer
-/// Format at ptr: [len: 4 bytes][data: len bytes]
-inline std::string read_json_from_ptr(int32_t ptr) {
-    if (ptr == 0) return "{}";
+/// The host writes data at the returned offset in format: [len: 4 bytes][data: len bytes]
+/// In WASM, linear memory starts at address 0, so the offset IS the address
+inline std::string read_json_from_ptr(int32_t offset) {
+    if (offset == 0) return "{}";
     
-    // Read length (4 bytes at ptr)
-    const uint32_t* len_ptr = reinterpret_cast<const uint32_t*>(static_cast<uintptr_t>(ptr));
-    uint32_t len = *len_ptr;
+    // In WASM linear memory, offset is the actual memory address
+    // Cast the offset to a pointer (this works because WASM linear memory
+    // is mapped starting at low addresses in the process)
+    uint8_t* base = reinterpret_cast<uint8_t*>(0);
+    
+    // Read length (4 bytes at offset)
+    uint32_t len;
+    std::memcpy(&len, base + offset, sizeof(len));
     
     if (len == 0 || len > 1024 * 1024) return "{}"; // Sanity check
     
-    // Read data (starts at ptr + 4)
-    const char* data_ptr = reinterpret_cast<const char*>(static_cast<uintptr_t>(ptr + 4));
-    return std::string(data_ptr, len);
+    // Read data (starts at offset + 4)
+    return std::string(reinterpret_cast<char*>(base + offset + 4), len);
 }
 
 /// Simple JSON value extractor (avoids full JSON parser dependency)
