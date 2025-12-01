@@ -837,12 +837,13 @@ fn write_string_to_wasm<T>(caller: &mut Caller<'_, T>, s: &str) -> i32 {
     let bytes = s.as_bytes();
     let len = bytes.len();
     
-    // Write: [len: 4 bytes][data: len bytes] at a fixed offset
-    let offset = 1024;
+    // Write: [len: 4 bytes][data: len bytes] at a high fixed offset
+    // Using 1MB offset to avoid conflicts with stack/heap at low addresses
+    let offset = 1048576;  // 1MB
     
     let data = memory.data_mut(caller);
     if data.len() < offset + len + 8 {
-        error!("WASM memory too small for attestation response");
+        error!("WASM memory too small for attestation response (need {} bytes at offset {})", len + 8, offset);
         return 0;
     }
     
