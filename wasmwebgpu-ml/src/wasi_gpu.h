@@ -59,7 +59,7 @@ typedef struct {
 // ═══════════════════════════════════════════════════════════════════════════
 
 /// Get information about the GPU device
-__attribute__((import_module("wasi:gpu/compute")))
+__attribute__((import_module("wasi:gpu/compute@0.1.0")))
 __attribute__((import_name("get-device-info")))
 void wasi_gpu_get_device_info(
     char* name_ptr, uint32_t name_len,
@@ -70,7 +70,7 @@ void wasi_gpu_get_device_info(
 );
 
 /// Create a new GPU buffer
-__attribute__((import_module("wasi:gpu/compute")))
+__attribute__((import_module("wasi:gpu/compute@0.1.0")))
 __attribute__((import_name("buffer-create")))
 wasi_gpu_error wasi_gpu_buffer_create(
     uint64_t size,
@@ -79,7 +79,7 @@ wasi_gpu_error wasi_gpu_buffer_create(
 );
 
 /// Write data to a GPU buffer
-__attribute__((import_module("wasi:gpu/compute")))
+__attribute__((import_module("wasi:gpu/compute@0.1.0")))
 __attribute__((import_name("buffer-write")))
 wasi_gpu_error wasi_gpu_buffer_write(
     wasi_gpu_buffer_id buffer,
@@ -89,7 +89,7 @@ wasi_gpu_error wasi_gpu_buffer_write(
 );
 
 /// Read data from a GPU buffer
-__attribute__((import_module("wasi:gpu/compute")))
+__attribute__((import_module("wasi:gpu/compute@0.1.0")))
 __attribute__((import_name("buffer-read")))
 wasi_gpu_error wasi_gpu_buffer_read(
     wasi_gpu_buffer_id buffer,
@@ -100,7 +100,7 @@ wasi_gpu_error wasi_gpu_buffer_read(
 );
 
 /// Copy data between GPU buffers
-__attribute__((import_module("wasi:gpu/compute")))
+__attribute__((import_module("wasi:gpu/compute@0.1.0")))
 __attribute__((import_name("buffer-copy")))
 wasi_gpu_error wasi_gpu_buffer_copy(
     wasi_gpu_buffer_id src,
@@ -111,12 +111,12 @@ wasi_gpu_error wasi_gpu_buffer_copy(
 );
 
 /// Destroy a GPU buffer
-__attribute__((import_module("wasi:gpu/compute")))
+__attribute__((import_module("wasi:gpu/compute@0.1.0")))
 __attribute__((import_name("buffer-destroy")))
 wasi_gpu_error wasi_gpu_buffer_destroy(wasi_gpu_buffer_id buffer);
 
 /// Synchronize GPU operations
-__attribute__((import_module("wasi:gpu/compute")))
+__attribute__((import_module("wasi:gpu/compute@0.1.0")))
 __attribute__((import_name("sync")))
 void wasi_gpu_sync(void);
 
@@ -202,7 +202,7 @@ typedef struct {
 // ═══════════════════════════════════════════════════════════════════════════
 
 /// Generate bootstrap sample indices on GPU
-__attribute__((import_module("wasi:gpu/ml-kernels")))
+__attribute__((import_module("wasi:gpu/ml-kernels@0.1.0")))
 __attribute__((import_name("kernel-bootstrap-sample")))
 wasi_gpu_error wasi_gpu_kernel_bootstrap_sample(
     const wasi_gpu_bootstrap_params_t* params,
@@ -210,7 +210,7 @@ wasi_gpu_error wasi_gpu_kernel_bootstrap_sample(
 );
 
 /// Find the best split threshold for a decision tree node
-__attribute__((import_module("wasi:gpu/ml-kernels")))
+__attribute__((import_module("wasi:gpu/ml-kernels@0.1.0")))
 __attribute__((import_name("kernel-find-split")))
 wasi_gpu_error wasi_gpu_kernel_find_split(
     const wasi_gpu_find_split_params_t* params,
@@ -222,7 +222,7 @@ wasi_gpu_error wasi_gpu_kernel_find_split(
 );
 
 /// Average predictions across all trees in a forest
-__attribute__((import_module("wasi:gpu/ml-kernels")))
+__attribute__((import_module("wasi:gpu/ml-kernels@0.1.0")))
 __attribute__((import_name("kernel-average")))
 wasi_gpu_error wasi_gpu_kernel_average(
     const wasi_gpu_average_params_t* params,
@@ -231,7 +231,7 @@ wasi_gpu_error wasi_gpu_kernel_average(
 );
 
 /// Matrix multiplication
-__attribute__((import_module("wasi:gpu/ml-kernels")))
+__attribute__((import_module("wasi:gpu/ml-kernels@0.1.0")))
 __attribute__((import_name("kernel-matmul")))
 wasi_gpu_error wasi_gpu_kernel_matmul(
     const wasi_gpu_matmul_params_t* params,
@@ -241,7 +241,7 @@ wasi_gpu_error wasi_gpu_kernel_matmul(
 );
 
 /// Apply element-wise operation
-__attribute__((import_module("wasi:gpu/ml-kernels")))
+__attribute__((import_module("wasi:gpu/ml-kernels@0.1.0")))
 __attribute__((import_name("kernel-elementwise")))
 wasi_gpu_error wasi_gpu_kernel_elementwise(
     const wasi_gpu_elementwise_params_t* params,
@@ -251,7 +251,7 @@ wasi_gpu_error wasi_gpu_kernel_elementwise(
 );
 
 /// Reduce array to single value
-__attribute__((import_module("wasi:gpu/ml-kernels")))
+__attribute__((import_module("wasi:gpu/ml-kernels@0.1.0")))
 __attribute__((import_name("kernel-reduce")))
 wasi_gpu_error wasi_gpu_kernel_reduce(
     const wasi_gpu_reduce_params_t* params,
@@ -260,7 +260,7 @@ wasi_gpu_error wasi_gpu_kernel_reduce(
 );
 
 /// Batch prediction for Random Forest
-__attribute__((import_module("wasi:gpu/ml-kernels")))
+__attribute__((import_module("wasi:gpu/ml-kernels@0.1.0")))
 __attribute__((import_name("kernel-batch-predict")))
 wasi_gpu_error wasi_gpu_kernel_batch_predict(
     const wasi_gpu_batch_predict_params_t* params,
