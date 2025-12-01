@@ -8,10 +8,29 @@
 
 #include <cstdint>
 #include <cstddef>
+#include <cstdlib>
 
 #ifdef __cplusplus
 extern "C" {
 #endif
+
+// ═══════════════════════════════════════════════════════════════════════════
+// Component Model ABI Support
+// ═══════════════════════════════════════════════════════════════════════════
+
+/// cabi_realloc - Required by wit-bindgen for dynamic memory allocation
+/// This function is called by the host to allocate memory in the guest
+/// for returning strings and lists.
+///
+/// Parameters:
+///   old_ptr  - Pointer to existing allocation (0 for new allocation)
+///   old_size - Size of existing allocation (0 for new allocation)  
+///   align    - Required alignment for the allocation
+///   new_size - Desired size of the new allocation
+///
+/// Returns: Pointer to allocated memory, or 0 on failure
+__attribute__((export_name("cabi_realloc")))
+void* cabi_realloc(void* old_ptr, size_t old_size, size_t align, size_t new_size);
 
 // ═══════════════════════════════════════════════════════════════════════════
 // Buffer Usage Flags (matching WIT flags buffer-usage)
