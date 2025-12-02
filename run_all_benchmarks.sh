@@ -1,230 +1,117 @@
 #!/bin/bash
+# ═══════════════════════════════════════════════════════════════════════════
+# Unified Benchmark Runner
+# Runs all three implementations: Python, Rust WASM, C++ WASM
+# ═══════════════════════════════════════════════════════════════════════════
+
 set -e
-
-# ╔════════════════════════════════════════════════╗
-# ║  Complete ML Benchmark Suite                   ║
-# ║  Python + Rust + C++ GPU Comparison            ║
-# ╚════════════════════════════════════════════════╝
-
-RESULTS_DIR="benchmark_results_$(date +%Y%m%d_%H%M%S)"
-mkdir -p "$RESULTS_DIR"
-
-echo "╔════════════════════════════════════════════════╗"
-echo "║  Complete ML Benchmark Suite                   ║"
-echo "║  Comparing: Python (RAPIDS) | Rust (wgpu) | C++║"
-echo "╚════════════════════════════════════════════════╝"
-echo ""
-echo "Results will be saved to: $RESULTS_DIR"
-echo ""
 
 cd "$(dirname "$0")"
 
-# ═══════════════════════════════════════════════
-# System Information
-# ═══════════════════════════════════════════════
+RUNTIME="./wasmtime-gpu-host/target/release/wasmtime-gpu-host"
+RUST_WASM="./wasm-ml/target/wasm32-wasip1/release/wasm-ml-benchmark.wasm"
+CPP_WASM="./wasmwebgpu-ml/build/wasmwebgpu-ml-benchmark.wasm"
+DATA_DIR="$(pwd)/data"
 
-echo "=== System Information ===" | tee "$RESULTS_DIR/system_info.txt"
-echo "" | tee -a "$RESULTS_DIR/system_info.txt"
-echo "Date: $(date)" | tee -a "$RESULTS_DIR/system_info.txt"
-echo "Hostname: $(hostname)" | tee -a "$RESULTS_DIR/system_info.txt"
-echo "OS: $(uname -a)" | tee -a "$RESULTS_DIR/system_info.txt"
-echo "" | tee -a "$RESULTS_DIR/system_info.txt"
+# Colors
+GREEN='\033[0;32m'
+BLUE='\033[0;34m'
+YELLOW='\033[1;33m'
+NC='\033[0m' # No Color
 
-# GPU Info
-if command -v nvidia-smi &> /dev/null; then
-    echo "GPU Information:" | tee -a "$RESULTS_DIR/system_info.txt"
-    nvidia-smi --query-gpu=name,driver_version,memory.total --format=csv,noheader | tee -a "$RESULTS_DIR/system_info.txt"
-else
-    echo "GPU: Not available or nvidia-smi not found" | tee -a "$RESULTS_DIR/system_info.txt"
-fi
+print_header() {
+    echo ""
+    echo "╔══════════════════════════════════════════════════════════════════════╗"
+    echo "║                    Confidential AI Healthcare Demo                    ║"
+    echo "║                      Unified Benchmark Suite                          ║"
+    echo "╚══════════════════════════════════════════════════════════════════════╝"
+    echo ""
+}
 
-echo "" | tee -a "$RESULTS_DIR/system_info.txt"
-
-# CPU Info
-echo "CPU Information:" | tee -a "$RESULTS_DIR/system_info.txt"
-lscpu | grep -E "Model name|CPU\(s\):|Thread" | tee -a "$RESULTS_DIR/system_info.txt"
-echo ""
-
-# ═══════════════════════════════════════════════
-# 1. Python (RAPIDS) Benchmark
-# ═══════════════════════════════════════════════
-
-echo "╔════════════════════════════════════════════════╗"
-echo "║  [1/3] Python (RAPIDS) Benchmark               ║"
-echo "╚════════════════════════════════════════════════╝"
-echo ""
-
-if [ -f "run_python_benchmark.sh" ]; then
-    echo "Running Python benchmark..." | tee "$RESULTS_DIR/python_results.txt"
-    echo "" | tee -a "$RESULTS_DIR/python_results.txt"
+run_python() {
+    echo -e "${BLUE}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
+    echo -e "${GREEN}[1/3] Running Python Baseline${NC}"
+    echo -e "${BLUE}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
+    echo ""
     
-    ./run_python_benchmark.sh 2>&1 | tee -a "$RESULTS_DIR/python_results.txt"
+    cd python-baseline
+    python3 src/main.py
+    cd ..
+}
+
+run_rust_wasm() {
+    echo ""
+    echo -e "${BLUE}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
+    echo -e "${GREEN}[2/3] Running Rust WASM${NC}"
+    echo -e "${BLUE}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
+    echo ""
     
-    if [ $? -eq 0 ]; then
-        echo "✅ Python benchmark completed" | tee -a "$RESULTS_DIR/python_results.txt"
-    else
-        echo "❌ Python benchmark failed" | tee -a "$RESULTS_DIR/python_results.txt"
+    if [ ! -f "$RUST_WASM" ]; then
+        echo "[ERROR] Rust WASM not found: $RUST_WASM"
+        echo "        Build with: cd wasm-ml && cargo build --target wasm32-wasip1 --release"
+        return 1
     fi
-else
-    echo "⚠️  Python benchmark script not found, skipping..." | tee "$RESULTS_DIR/python_results.txt"
-fi
-
-echo ""
-sleep 2
-
-# ═══════════════════════════════════════════════
-# 2. Rust (wgpu) Benchmark
-# ═══════════════════════════════════════════════
-
-echo "╔════════════════════════════════════════════════╗"
-echo "║  [2/3] Rust (wgpu) Benchmark                   ║"
-echo "╚════════════════════════════════════════════════╝"
-echo ""
-
-if [ -f "run_wasm_docker.sh" ]; then
-    echo "Running Rust WASM benchmark..." | tee "$RESULTS_DIR/rust_results.txt"
-    echo "" | tee -a "$RESULTS_DIR/rust_results.txt"
     
-    ./run_wasm_docker.sh 2>&1 | tee -a "$RESULTS_DIR/rust_results.txt"
+    "$RUNTIME" --backend cuda "$RUST_WASM" --dir "$DATA_DIR"
+}
+
+run_cpp_wasm() {
+    echo ""
+    echo -e "${BLUE}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
+    echo -e "${GREEN}[3/3] Running C++ WASM${NC}"
+    echo -e "${BLUE}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
+    echo ""
     
-    if [ $? -eq 0 ]; then
-        echo "✅ Rust benchmark completed" | tee -a "$RESULTS_DIR/rust_results.txt"
-    else
-        echo "❌ Rust benchmark failed" | tee -a "$RESULTS_DIR/rust_results.txt"
+    if [ ! -f "$CPP_WASM" ]; then
+        echo "[ERROR] C++ WASM not found: $CPP_WASM"
+        echo "        Build with: cd wasmwebgpu-ml && ./build.sh"
+        return 1
     fi
-else
-    echo "⚠️  Rust benchmark script not found, skipping..." | tee "$RESULTS_DIR/rust_results.txt"
-fi
-
-echo ""
-sleep 2
-
-# ═══════════════════════════════════════════════
-# 3. C++ (wasi:webgpu) Benchmark
-# ═══════════════════════════════════════════════
-
-echo "╔════════════════════════════════════════════════╗"
-echo "║  [3/3] C++ (wasi:webgpu) Benchmark             ║"
-echo "╚════════════════════════════════════════════════╝"
-echo ""
-
-if [ -f "run_wasmwebgpu_docker.sh" ]; then
-    echo "Running C++ WASM benchmark..." | tee "$RESULTS_DIR/cpp_results.txt"
-    echo "" | tee -a "$RESULTS_DIR/cpp_results.txt"
     
-    ./run_wasmwebgpu_docker.sh 2>&1 | tee -a "$RESULTS_DIR/cpp_results.txt"
-    
-    if [ $? -eq 0 ]; then
-        echo "✅ C++ benchmark completed" | tee -a "$RESULTS_DIR/cpp_results.txt"
-    else
-        echo "❌ C++ benchmark failed" | tee -a "$RESULTS_DIR/cpp_results.txt"
-    fi
-else
-    echo "⚠️  C++ benchmark script not found, skipping..." | tee "$RESULTS_DIR/cpp_results.txt"
-fi
+    "$RUNTIME" --backend cuda "$CPP_WASM" --dir "$DATA_DIR"
+}
 
-echo ""
+collect_results() {
+    echo ""
+    echo -e "${YELLOW}╔══════════════════════════════════════════════════════════════════════╗${NC}"
+    echo -e "${YELLOW}║                         BENCHMARK SUMMARY                            ║${NC}"
+    echo -e "${YELLOW}╚══════════════════════════════════════════════════════════════════════╝${NC}"
+    echo ""
+    echo "To extract JSON results, run each benchmark and grep for BENCHMARK_JSON:"
+    echo ""
+    echo "  ./run_all_benchmarks.sh 2>&1 | grep -A1 'BENCHMARK_JSON' | grep -v 'BENCHMARK_JSON' | grep -v '^--$'"
+    echo ""
+}
 
-# ═══════════════════════════════════════════════
-# Results Summary
-# ═══════════════════════════════════════════════
+# ═══════════════════════════════════════════════════════════════════════════
+# Main
+# ═══════════════════════════════════════════════════════════════════════════
 
-echo "╔════════════════════════════════════════════════╗"
-echo "║  Benchmark Results Summary                     ║"
-echo "╚════════════════════════════════════════════════╝"
-echo ""
+print_header
 
-SUMMARY_FILE="$RESULTS_DIR/SUMMARY.txt"
-
-echo "=== BENCHMARK RESULTS SUMMARY ===" > "$SUMMARY_FILE"
-echo "" >> "$SUMMARY_FILE"
-echo "Date: $(date)" >> "$SUMMARY_FILE"
-echo "Results Directory: $RESULTS_DIR" >> "$SUMMARY_FILE"
-echo "" >> "$SUMMARY_FILE"
-
-# Extract MSE
-echo "┌─────────────────────────────────────────────┐" >> "$SUMMARY_FILE"
-echo "│  Mean Squared Error (MSE)                   │" >> "$SUMMARY_FILE"
-echo "└─────────────────────────────────────────────┘" >> "$SUMMARY_FILE"
-echo "" >> "$SUMMARY_FILE"
-
-for impl in python rust cpp; do
-    if [ -f "$RESULTS_DIR/${impl}_results.txt" ]; then
-        MSE=$(grep -i "Mean Squared Error" "$RESULTS_DIR/${impl}_results.txt" | tail -1 || echo "N/A")
-        echo "${impl^^}: $MSE" >> "$SUMMARY_FILE"
-    fi
-done
-
-echo "" >> "$SUMMARY_FILE"
-
-# Extract Training Time
-echo "┌─────────────────────────────────────────────┐" >> "$SUMMARY_FILE"
-echo "│  Training Time                              │" >> "$SUMMARY_FILE"
-echo "└─────────────────────────────────────────────┘" >> "$SUMMARY_FILE"
-echo "" >> "$SUMMARY_FILE"
-
-for impl in python rust cpp; do
-    if [ -f "$RESULTS_DIR/${impl}_results.txt" ]; then
-        TRAIN_TIME=$(grep -iE "Training (completed|time)" "$RESULTS_DIR/${impl}_results.txt" | tail -1 || echo "N/A")
-        echo "${impl^^}: $TRAIN_TIME" >> "$SUMMARY_FILE"
-    fi
-done
-
-echo "" >> "$SUMMARY_FILE"
-
-# Extract Inference Time
-echo "┌─────────────────────────────────────────────┐" >> "$SUMMARY_FILE"
-echo "│  Inference Time                             │" >> "$SUMMARY_FILE"
-echo "└─────────────────────────────────────────────┘" >> "$SUMMARY_FILE"
-echo "" >> "$SUMMARY_FILE"
-
-for impl in python rust cpp; do
-    if [ -f "$RESULTS_DIR/${impl}_results.txt" ]; then
-        INFER_TIME=$(grep -iE "Inference (time|completed)" "$RESULTS_DIR/${impl}_results.txt" | tail -1 || echo "N/A")
-        echo "${impl^^}: $INFER_TIME" >> "$SUMMARY_FILE"
-    fi
-done
-
-echo "" >> "$SUMMARY_FILE"
-
-# Binary Sizes
-echo "┌─────────────────────────────────────────────┐" >> "$SUMMARY_FILE"
-echo "│  Binary Sizes                               │" >> "$SUMMARY_FILE"
-echo "└─────────────────────────────────────────────┘" >> "$SUMMARY_FILE"
-echo "" >> "$SUMMARY_FILE"
-
-if [ -f "wasm-ml/target/release/wasm-ml-benchmark.wasm" ]; then
-    RUST_SIZE=$(ls -lh wasm-ml/target/release/wasm-ml-benchmark.wasm | awk '{print $5}')
-    echo "RUST: $RUST_SIZE" >> "$SUMMARY_FILE"
-fi
-
-if [ -f "wasmwebgpu-ml/build/wasmwebgpu-ml-benchmark.wasm" ]; then
-    CPP_SIZE=$(ls -lh wasmwebgpu-ml/build/wasmwebgpu-ml-benchmark.wasm | awk '{print $5}')
-    echo "C++: $CPP_SIZE" >> "$SUMMARY_FILE"
-fi
-
-echo "" >> "$SUMMARY_FILE"
-
-# ═══════════════════════════════════════════════
-# Display Summary
-# ═══════════════════════════════════════════════
-
-cat "$SUMMARY_FILE"
-
-echo ""
-echo "╔════════════════════════════════════════════════╗"
-echo "║  ✅ All Benchmarks Complete!                   ║"
-echo "╚════════════════════════════════════════════════╝"
-echo ""
-echo "Full results saved to: $RESULTS_DIR/"
-echo ""
-echo "Files:"
-echo "  - system_info.txt     System and GPU information"
-echo "  - python_results.txt  Python (RAPIDS) benchmark"
-echo "  - rust_results.txt    Rust (wgpu) benchmark"
-echo "  - cpp_results.txt     C++ (wasi:webgpu) benchmark"
-echo "  - SUMMARY.txt         Comparison summary"
-echo ""
-echo "To view summary:"
-echo "  cat $RESULTS_DIR/SUMMARY.txt"
-echo ""
+case "${1:-all}" in
+    python)
+        run_python
+        ;;
+    rust)
+        run_rust_wasm
+        ;;
+    cpp)
+        run_cpp_wasm
+        ;;
+    all)
+        run_python
+        run_rust_wasm
+        run_cpp_wasm
+        collect_results
+        ;;
+    *)
+        echo "Usage: $0 [python|rust|cpp|all]"
+        echo ""
+        echo "  python  - Run Python baseline only"
+        echo "  rust    - Run Rust WASM only"
+        echo "  cpp     - Run C++ WASM only"
+        echo "  all     - Run all benchmarks (default)"
+        exit 1
+        ;;
+esac

@@ -1,10 +1,42 @@
-joblib==1.4.2
-requests==2.32.3
-scikit-learn
-numpy==2.2.6
-nv-attestation-sdk==2.6.3
-#nvidia-ml-py==13.580.82
-# pynvml==13.0.1
-# cupy-cuda13x==13.6.0
-# cuda-python==12.9.4
-requests
+# ═══════════════════════════════════════════════════════════════════════════
+# Python Dependencies for Confidential AI Healthcare Demo
+# ═══════════════════════════════════════════════════════════════════════════
+#
+# IMPORTANT: CUDA version must match the NVIDIA driver
+# - Driver 570.x supports CUDA <= 12.8
+# - Driver 560.x supports CUDA <= 12.6
+# - Check with: nvidia-smi (shows max supported CUDA version)
+#
+# ═══════════════════════════════════════════════════════════════════════════
+
+# Core ML
+scikit-learn>=1.3.0
+joblib>=1.4.0
+numpy>=1.24.0,<2.0  # NumPy 2.x can have compatibility issues
+
+# HTTP requests (for NRAS attestation)
+requests>=2.31.0
+
+# NVIDIA Attestation SDK
+nv-attestation-sdk>=2.6.0
+
+# ═══════════════════════════════════════════════════════════════════════════
+# GPU Dependencies (CUDA 12.8 - compatible with driver 570.x)
+# ═══════════════════════════════════════════════════════════════════════════
+#
+# NOTE: For GPU support, use conda instead of pip:
+#
+#   conda install -c rapidsai -c conda-forge -c nvidia \
+#       cuml cudf cupy rapids=25.10 cuda-version=12.8
+#
+# The packages below are pip alternatives but conda is recommended for RAPIDS
+# ═══════════════════════════════════════════════════════════════════════════
+
+# CuPy for CUDA 12.x (pip version)
+# cupy-cuda12x>=13.0.0
+
+# CUDA Python bindings
+# cuda-python>=12.8.0,<13.0.0
+
+# NVIDIA ML library
+# nvidia-ml-py>=12.0.0
