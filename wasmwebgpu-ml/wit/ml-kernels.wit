@@ -1,0 +1,252 @@
+/// High-level ML kernel interface
+/// 
+/// Provides pre-defined ML operations that map to optimized GPU kernels.
+/// On CUDA backend: uses cuBLAS, cuDNN, and custom CUDA kernels
+/// On WebGPU backend: uses WGSL compute shaders
+
+interface ml-kernels {
+    use compute.{buffer-id, gpu-error};
+
+    // ═══════════════════════════════════════════════════════════════════════
+    // Random Forest Training Kernels
+    // ═══════════════════════════════════════════════════════════════════════
+
+    /// Parameters for bootstrap sampling
+    record bootstrap-params {
+        /// Number of samples to generate
+        n-samples: u32,
+        /// Random seed for reproducibility
+        seed: u32,
+        /// Maximum index value (dataset size)
+        max-index: u32,
+    }
+
+    /// Generate bootstrap sample indices on GPU
+    /// 
+    /// Creates random indices with replacement for bagging.
+    /// Output buffer must be pre-allocated with size = n_samples * 4 bytes
+    /// 
+    /// # Performance
+    /// - CUDA: Custom kernel with cuRAND
+    /// - WebGPU: PCG hash-based PRNG shader
+    kernel-bootstrap-sample: func(
+        params: bootstrap-params,
+        output-indices: buffer-id
+    ) -> result<_, gpu-error>;
+
+    /// Parameters for finding best split
+    record find-split-params {
+        /// Number of samples in current node
+        n-samples: u32,
+        /// Total number of features
+        n-features: u32,
+        /// Feature index to evaluate
+        feature-idx: u32,
+        /// Number of threshold candidates
+        n-thresholds: u32,
+    }
+
+    /// Find the best split threshold for a decision tree node
+    /// 
+    /// Computes MSE reduction for each threshold candidate in parallel.
+    /// 
+    /// # Buffers
+    /// - `data`: Feature matrix (n_total_samples × n_features), row-major f32
+    /// - `labels`: Target values (n_total_samples), f32
+    /// - `indices`: Bootstrap indices for current tree (n_samples), u32
+    /// - `thresholds`: Candidate threshold values (n_thresholds), f32
+    /// - `output-scores`: MSE scores for each threshold (n_thresholds), f32
+    /// 
+    /// # Performance
+    /// - CUDA: Parallel reduction with shared memory
+    /// - WebGPU: Workgroup-based reduction
+    kernel-find-split: func(
+        params: find-split-params,
+        data: buffer-id,
+        labels: buffer-id,
+        indices: buffer-id,
+        thresholds: buffer-id,
+        output-scores: buffer-id
+    ) -> result<_, gpu-error>;
+
+    // ═══════════════════════════════════════════════════════════════════════
+    // Prediction/Inference Kernels  
+    // ═══════════════════════════════════════════════════════════════════════
+
+    /// Parameters for averaging tree predictions
+    record average-params {
+        /// Number of trees in the forest
+        n-trees: u32,
+        /// Number of samples to predict
+        n-samples: u32,
+    }
+
+    /// Average predictions across all trees in a forest
+    /// 
+    /// # Buffers
+    /// - `tree-predictions`: All tree predictions (n_samples × n_trees), f32
+    /// - `output`: Averaged predictions (n_samples), f32
+    /// 
+    /// # Performance
+    /// - CUDA: Parallel reduction, potentially uses Tensor Cores for large batches
+    /// - WebGPU: Workgroup reduction shader
+    kernel-average: func(
+        params: average-params,
+        tree-predictions: buffer-id,
+        output: buffer-id
+    ) -> result<_, gpu-error>;
+
+    // ═══════════════════════════════════════════════════════════════════════
+    // Linear Algebra Kernels (for future neural network support)
+    // ═══════════════════════════════════════════════════════════════════════
+
+    /// Parameters for matrix multiplication
+    record matmul-params {
+        /// Rows in matrix A
+        m: u32,
+        /// Columns in A / Rows in B  
+        k: u32,
+        /// Columns in matrix B
+        n: u32,
+        /// Transpose A?
+        trans-a: bool,
+        /// Transpose B?
+        trans-b: bool,
+        /// Scalar multiplier (C = alpha * A @ B + beta * C)
+        alpha: f32,
+        /// Scalar for accumulation
+        beta: f32,
+    }
+
+    /// Matrix multiplication: C = alpha * A @ B + beta * C
+    /// 
+    /// # Buffers
+    /// - `a`: Matrix A (m × k if !trans_a, k × m if trans_a), f32
+    /// - `b`: Matrix B (k × n if !trans_b, n × k if trans_b), f32  
+    /// - `c`: Matrix C (m × n), f32 - also output
+    /// 
+    /// # Performance
+    /// - CUDA: cuBLAS SGEMM, uses Tensor Cores on H100
+    /// - WebGPU: Tiled matrix multiplication shader
+    kernel-matmul: func(
+        params: matmul-params,
+        a: buffer-id,
+        b: buffer-id,
+        c: buffer-id
+    ) -> result<_, gpu-error>;
+
+    /// Parameters for element-wise operations
+    record elementwise-params {
+        /// Number of elements
+        n-elements: u32,
+        /// Operation type
+        op: elementwise-op,
+    }
+
+    /// Supported element-wise operations
+    enum elementwise-op {
+        /// ReLU activation: max(0, x)
+        relu,
+        /// Sigmoid activation: 1 / (1 + exp(-x))
+        sigmoid,
+        /// Tanh activation
+        tanh,
+        /// Element-wise addition
+        add,
+        /// Element-wise multiplication
+        mul,
+        /// Square root
+        sqrt,
+        /// Exponential
+        exp,
+        /// Natural logarithm
+        log,
+    }
+
+    /// Apply element-wise operation
+    /// 
+    /// For unary ops (relu, sigmoid, etc.): output = op(input)
+    /// For binary ops (add, mul): output = op(input_a, input_b)
+    /// 
+    /// # Buffers
+    /// - `input-a`: First input (n_elements), f32
+    /// - `input-b`: Second input for binary ops (n_elements), f32 - can be same as output
+    /// - `output`: Result (n_elements), f32
+    kernel-elementwise: func(
+        params: elementwise-params,
+        input-a: buffer-id,
+        input-b: option<buffer-id>,
+        output: buffer-id
+    ) -> result<_, gpu-error>;
+
+    /// Parameters for reduction operations
+    record reduce-params {
+        /// Number of elements to reduce
+        n-elements: u32,
+        /// Reduction operation
+        op: reduce-op,
+    }
+
+    /// Supported reduction operations
+    enum reduce-op {
+        /// Sum all elements
+        sum,
+        /// Find maximum
+        max,
+        /// Find minimum  
+        min,
+        /// Compute mean
+        mean,
+        /// Compute variance
+        variance,
+    }
+
+    /// Reduce array to single value
+    /// 
+    /// # Buffers
+    /// - `input`: Input array (n_elements), f32
+    /// - `output`: Single result value, f32
+    kernel-reduce: func(
+        params: reduce-params,
+        input: buffer-id,
+        output: buffer-id
+    ) -> result<_, gpu-error>;
+
+    // ═══════════════════════════════════════════════════════════════════════
+    // Batch Operations (optimized for inference)
+    // ═══════════════════════════════════════════════════════════════════════
+
+    /// Parameters for batch prediction
+    record batch-predict-params {
+        /// Number of samples in batch
+        batch-size: u32,
+        /// Number of features per sample
+        n-features: u32,
+        /// Number of trees in forest
+        n-trees: u32,
+        /// Maximum tree depth (for memory allocation)
+        max-depth: u32,
+    }
+
+    /// Batch prediction for Random Forest
+    /// 
+    /// Traverses all trees in parallel for all samples.
+    /// This is the most optimized kernel for inference.
+    /// 
+    /// # Buffers
+    /// - `samples`: Input data (batch_size × n_features), f32
+    /// - `tree-nodes`: Serialized tree structure, see TreeNode format
+    /// - `tree-offsets`: Starting offset for each tree (n_trees), u32
+    /// - `output`: Predictions (batch_size), f32
+    /// 
+    /// # Performance
+    /// - CUDA: Warp-level parallelism, memory coalescing
+    /// - WebGPU: Per-sample parallelism
+    kernel-batch-predict: func(
+        params: batch-predict-params,
+        samples: buffer-id,
+        tree-nodes: buffer-id,
+        tree-offsets: buffer-id,
+        output: buffer-id
+    ) -> result<_, gpu-error>;
+}

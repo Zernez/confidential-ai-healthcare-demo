@@ -1,0 +1,15 @@
+/// WASI GPU Interface
+/// 
+/// Provides a portable interface for GPU compute operations.
+/// Backend implementations can use WebGPU/Vulkan or CUDA.
+///
+/// This interface is designed for ML workloads in confidential computing
+/// environments where the WASM module doesn't directly access GPU APIs.
+
+package wasi:gpu@0.1.0;
+
+/// Main world that WASM modules target
+world ml-compute {
+    import compute;
+    import ml-kernels;
+}

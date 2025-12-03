@@ -1,551 +1,225 @@
 /**
  * @file gpu_executor.cpp  
- * @brief Implementation of GPU executor with complete wasi:webgpu pipeline
+ * @brief Implementation of GPU executor using wasi:gpu host functions
+ * 
+ * This implementation uses the wasi:gpu interface which is backend-agnostic.
+ * The host runtime can implement it using WebGPU/Vulkan or CUDA.
  */
 
 #include "gpu_executor.hpp"
-#include "random_forest.hpp"
+#include "wasi_gpu.h"
 #include <iostream>
-#include <stdexcept>
-#include <fstream>
-#include <cmath>
 #include <cstring>
-
-// ═══════════════════════════════════════════════════════════════════════
-// Direct wasi:webgpu Function Declarations - ALL 17 FUNCTIONS
-// ═══════════════════════════════════════════════════════════════════════
-
-#pragma clang diagnostic push
-#pragma clang diagnostic ignored "-Wreturn-type-c-linkage"
-
-extern "C" {
-    // Basic setup (4 functions)
-    __attribute__((import_module("wasi:webgpu")))
-    __attribute__((import_name("create-instance")))
-    uint32_t __wasi_webgpu_create_instance();
-    
-    __attribute__((import_module("wasi:webgpu")))
-    __attribute__((import_name("request-adapter")))
-    uint32_t __wasi_webgpu_request_adapter(uint32_t instance, uint32_t power_preference);
-    
-    __attribute__((import_module("wasi:webgpu")))
-    __attribute__((import_name("request-device")))
-    uint32_t __wasi_webgpu_request_device(uint32_t adapter);
-    
-    __attribute__((import_module("wasi:webgpu")))
-    __attribute__((import_name("get-queue")))
-    uint32_t __wasi_webgpu_get_queue(uint32_t device);
-    
-    // Buffer operations (3 functions)
-    __attribute__((import_module("wasi:webgpu")))
-    __attribute__((import_name("create-buffer")))
-    uint32_t __wasi_webgpu_create_buffer(uint32_t device, uint64_t size, uint32_t usage);
-    
-    __attribute__((import_module("wasi:webgpu")))
-    __attribute__((import_name("queue-write-buffer")))
-    void __wasi_webgpu_queue_write_buffer(uint32_t queue, uint32_t buffer, 
-                                          uint64_t offset, const void* data, uint32_t data_len);
-    
-    __attribute__((import_module("wasi:webgpu")))
-    __attribute__((import_name("buffer-unmap")))
-    void __wasi_webgpu_buffer_unmap(uint32_t buffer);
-    
-    // Shader and pipeline (4 functions)
-    __attribute__((import_module("wasi:webgpu")))
-    __attribute__((import_name("create-shader-module")))
-    uint32_t __wasi_webgpu_create_shader_module(uint32_t device, 
-                                                const char* code, uint32_t code_len);
-    
-    __attribute__((import_module("wasi:webgpu")))
-    __attribute__((import_name("create-bind-group-layout")))
-    uint32_t __wasi_webgpu_create_bind_group_layout(uint32_t device, 
-                                                     uint32_t entry_count,
-                                                     uint32_t entries_ptr);
-    
-    __attribute__((import_module("wasi:webgpu")))
-    __attribute__((import_name("create-compute-pipeline")))
-    uint32_t __wasi_webgpu_create_compute_pipeline(uint32_t device,
-                                                   uint32_t shader_id,
-                                                   const char* entry_point,
-                                                   uint32_t entry_point_len,
-                                                   uint32_t layout_id);
-    
-    __attribute__((import_module("wasi:webgpu")))
-    __attribute__((import_name("create-bind-group")))
-    uint32_t __wasi_webgpu_create_bind_group(uint32_t device,
-                                             uint32_t layout_id,
-                                             uint32_t buffer_count,
-                                             uint32_t buffer_ids_ptr);
-    
-    // Command encoding and execution (3 functions)
-    __attribute__((import_module("wasi:webgpu")))
-    __attribute__((import_name("create-command-encoder")))
-    uint32_t __wasi_webgpu_create_command_encoder(uint32_t device);
-    
-    __attribute__((import_module("wasi:webgpu")))
-    __attribute__((import_name("dispatch-compute")))
-    void __wasi_webgpu_dispatch_compute(uint32_t encoder_id,
-                                       uint32_t pipeline_id,
-                                       uint32_t bind_group_id,
-                                       uint32_t workgroup_count_x,
-                                       uint32_t workgroup_count_y,
-                                       uint32_t workgroup_count_z);
-    
-    __attribute__((import_module("wasi:webgpu")))
-    __attribute__((import_name("submit-commands")))
-    void __wasi_webgpu_submit_commands(uint32_t queue, uint32_t encoder_id);
-    
-    __attribute__((import_module("wasi:webgpu")))
-    __attribute__((import_name("copy-buffer-to-buffer")))
-    void __wasi_webgpu_copy_buffer_to_buffer(uint32_t encoder,
-                                             uint32_t src_buffer,
-                                             uint64_t src_offset,
-                                             uint32_t dst_buffer,
-                                             uint64_t dst_offset,
-                                             uint64_t size);
-    
-    // Buffer mapping for readback (3 functions)
-    __attribute__((import_module("wasi:webgpu")))
-    __attribute__((import_name("buffer-map-async")))
-    void __wasi_webgpu_buffer_map_async(uint32_t buffer_id,
-                                       uint32_t mode,
-                                       uint64_t offset,
-                                       uint64_t size,
-                                       uint32_t callback_ptr,
-                                       uint32_t callback_len);
-    
-    __attribute__((import_module("wasi:webgpu")))
-    __attribute__((import_name("buffer-get-mapped-range")))
-    void __wasi_webgpu_buffer_get_mapped_range(uint32_t buffer_id,
-                                               uint64_t offset,
-                                               uint64_t size,
-                                               uint32_t dest_ptr);
-}
-
-#pragma clang diagnostic pop
+#include <algorithm>
+#include <cmath>
 
 namespace ml {
 
-/**
- * @struct GpuExecutor::Impl
- * @brief Private implementation with complete wasi:webgpu pipeline
- */
-struct GpuExecutor::Impl {
-    bool gpu_available;
+// ═══════════════════════════════════════════════════════════════════════════
+// GpuExecutor Implementation
+// ═══════════════════════════════════════════════════════════════════════════
+
+GpuExecutor::GpuExecutor() : available_(false) {
+    // Query device info from host using the wrapper function
+    wasi_gpu_device_info_t info = {0};
+    wasi_gpu_get_device_info(&info);
     
-    // WebGPU resource handles (IDs returned by wasi:webgpu)
-    uint32_t instance_id;
-    uint32_t adapter_id;
-    uint32_t device_id;
-    uint32_t queue_id;
+    device_info_.name = info.name;
+    device_info_.backend = info.backend;
+    device_info_.total_memory = info.total_memory;
+    device_info_.is_hardware = (info.is_hardware != 0);
+    device_info_.compute_capability = info.compute_capability;
     
-    // Shader cache
-    std::string bootstrap_shader;
-    std::string split_shader;
-    std::string average_shader;
+    // Check if we got valid device info
+    if (!device_info_.name.empty() && device_info_.total_memory > 0) {
+        available_ = true;
+    }
+}
+
+GpuExecutor::~GpuExecutor() {
+}
+
+uint32_t GpuExecutor::create_buffer(uint64_t size, uint32_t usage) {
+    if (!available_) return 0;
     
-    Impl() : gpu_available(false), instance_id(0), adapter_id(0), 
-             device_id(0), queue_id(0) {
-        std::cerr << "[GPU] Initializing WebGPU via wasi:webgpu..." << std::endl;
-        
-        // Load shaders first
-        load_shaders();
-        
-        // Try to initialize GPU
-        if (try_init_gpu()) {
-            gpu_available = true;
-            std::cerr << "[GPU] wasi:webgpu initialized successfully" << std::endl;
-        } else {
-            std::cerr << "[GPU] wasi:webgpu not available, will use CPU fallback" << std::endl;
-        }
+    wasi_gpu_buffer_id buffer_id = 0;
+    wasi_gpu_error err = wasi_gpu_buffer_create(size, usage, &buffer_id);
+    
+    if (err != WASI_GPU_SUCCESS) {
+        return 0;
     }
     
-    bool try_init_gpu() {
-        std::cerr << "[GPU] Calling wasi:webgpu create-instance..." << std::endl;
-        instance_id = __wasi_webgpu_create_instance();
-        std::cerr << "[GPU] Instance ID: " << instance_id << std::endl;
-        if (instance_id == 0) {
-            std::cerr << "[GPU] Failed to create instance" << std::endl;
-            return false;
-        }
+    return buffer_id;
+}
 
-        std::cerr << "[GPU] Calling wasi:webgpu request-adapter..." << std::endl;
-        adapter_id = __wasi_webgpu_request_adapter(instance_id, 1); // 1 = high performance
-        std::cerr << "[GPU] Adapter ID: " << adapter_id << std::endl;
-        if (adapter_id == 0) {
-            std::cerr << "[GPU] Failed to request adapter" << std::endl;
-            return false;
-        }
-
-        std::cerr << "[GPU] Calling wasi:webgpu request-device..." << std::endl;
-        device_id = __wasi_webgpu_request_device(adapter_id);
-        std::cerr << "[GPU] Device ID: " << device_id << std::endl;
-        if (device_id == 0) {
-            std::cerr << "[GPU] Failed to request device" << std::endl;
-            return false;
-        }
-
-        std::cerr << "[GPU] Calling wasi:webgpu get-queue..." << std::endl;
-        queue_id = __wasi_webgpu_get_queue(device_id);
-        std::cerr << "[GPU] Queue ID: " << queue_id << std::endl;
-        if (queue_id == 0) {
-            std::cerr << "[GPU] Failed to get queue" << std::endl;
-            return false;
-        }
-
-        return true;
-    }
+bool GpuExecutor::write_buffer(uint32_t buffer_id, uint64_t offset, const void* data, size_t size) {
+    if (!available_ || buffer_id == 0) return false;
     
-    void load_shaders() {
-        bootstrap_shader = load_shader_file("shaders/bootstrap_sample.wgsl");
-        split_shader = load_shader_file("shaders/find_split.wgsl");
-        average_shader = load_shader_file("shaders/average.wgsl");
-        
-        if (!bootstrap_shader.empty() && !split_shader.empty() && !average_shader.empty()) {
-            std::cerr << "[GPU] All shaders loaded successfully" << std::endl;
-        } else {
-            std::cerr << "[GPU] Some shaders failed to load" << std::endl;
-        }
-    }
+    wasi_gpu_error err = wasi_gpu_buffer_write(
+        buffer_id, 
+        offset, 
+        static_cast<const uint8_t*>(data), 
+        static_cast<uint32_t>(size)
+    );
     
-    std::string load_shader_file(const std::string& path) {
-        std::ifstream file(path);
-        if (!file) {
-            std::cerr << "[GPU] Could not load shader: " << path << std::endl;
-            return "";
-        }
-        
-        std::string content((std::istreambuf_iterator<char>(file)),
-                           std::istreambuf_iterator<char>());
-        
-        std::cerr << "[GPU] Loaded shader: " << path << " (" << content.size() << " bytes)" << std::endl;
-        return content;
-    }
+    return err == WASI_GPU_SUCCESS;
+}
+
+bool GpuExecutor::read_buffer(uint32_t buffer_id, uint64_t offset, void* data, size_t size) {
+    if (!available_ || buffer_id == 0) return false;
     
-    ~Impl() {
-        if (gpu_available) {
-            std::cerr << "[GPU] Cleaning up wasi:webgpu resources..." << std::endl;
-        }
+    uint32_t out_len = 0;
+    wasi_gpu_error err = wasi_gpu_buffer_read(
+        buffer_id,
+        offset,
+        static_cast<uint32_t>(size),
+        static_cast<uint8_t*>(data),
+        &out_len
+    );
+    
+    return err == WASI_GPU_SUCCESS && out_len == size;
+}
+
+void GpuExecutor::destroy_buffer(uint32_t buffer_id) {
+    if (available_ && buffer_id != 0) {
+        wasi_gpu_buffer_destroy(buffer_id);
     }
-};
+}
 
-// ═══════════════════════════════════════════════════════════════════════
-// Public Interface Implementation
-// ═══════════════════════════════════════════════════════════════════════
-
-GpuExecutor::GpuExecutor()
-    : impl_(std::make_unique<Impl>())
-    , available_(impl_->gpu_available)
-{
-    std::cout << "[GPU] GPU Executor created" << std::endl;
+void GpuExecutor::sync() {
     if (available_) {
-        std::cout << "[GPU] GPU acceleration available via wasi:webgpu" << std::endl;
-    } else {
-        std::cout << "[GPU] Using CPU fallback" << std::endl;
+        wasi_gpu_sync();
     }
 }
 
-GpuExecutor::~GpuExecutor() = default;
-
-bool GpuExecutor::is_available() const {
-    return available_;
-}
-
-std::vector<uint32_t> GpuExecutor::bootstrap_sample(size_t n_samples, uint32_t seed) {
-    std::cout << "[GPU] bootstrap_sample (n_samples=" << n_samples 
-              << ", seed=" << seed << ")" << std::endl;
-
-    std::vector<uint32_t> indices;
-    indices.reserve(n_samples);
-
-    bool gpu_ok = available_;
-
-    if (gpu_ok) {
-        // ═══════════════════════════════════════════════════════════════════════
-        // COMPLETE GPU PIPELINE IMPLEMENTATION
-        // ═══════════════════════════════════════════════════════════════════════
-
-        std::cout << "[GPU] Executing COMPLETE GPU pipeline..." << std::endl;
-
-        // Parameters struct to pass to GPU
-        struct GpuParams {
-            uint32_t n_samples;
-            uint32_t seed;
-            uint32_t padding[2]; // Align to 16 bytes
-        };
-
-        GpuParams params;
-        params.n_samples = static_cast<uint32_t>(n_samples);
-        params.seed = seed;
-        params.padding[0] = 0;
-        params.padding[1] = 0;
-
-        // Step 1: Create buffers
-        std::cout << "[GPU] Step 1: Creating buffers..." << std::endl;
-
-        // GPU buffer for indices (storage + copy source)
-        uint64_t output_size = n_samples * sizeof(uint32_t);
-        uint32_t gpu_buffer = __wasi_webgpu_create_buffer(
-            impl_->device_id,
-            output_size,
-            0x0084 // STORAGE | COPY_SRC
-        );
-        std::cout << "[GPU]   GPU buffer ID: " << gpu_buffer << std::endl;
-        
-        // Params buffer (uniform) - CREATE THIS SECOND so IDs are sequential!
-        uint64_t params_size = sizeof(GpuParams);
-        uint32_t params_buffer = __wasi_webgpu_create_buffer(
-            impl_->device_id,
-            params_size,
-            0x0048 // UNIFORM | COPY_DST
-        );
-        std::cout << "[GPU]   Params buffer ID: " << params_buffer << std::endl;
-        
-        // Staging buffer for CPU readback (copy destination + map read)
-        // CREATE THIS LAST - not used in bind group
-        uint32_t staging_buffer = __wasi_webgpu_create_buffer(
-            impl_->device_id,
-            output_size,
-            0x0009 // COPY_DST | MAP_READ
-        );
-        std::cout << "[GPU]   Staging buffer ID: " << staging_buffer << std::endl;
-
-        // Write parameters to buffer
-        __wasi_webgpu_queue_write_buffer(
-            impl_->queue_id,
-            params_buffer,
-            0,
-            &params,
-            sizeof(GpuParams)
-        );
-        std::cout << "[GPU]   Parameters written to buffer" << std::endl;
-
-        // Step 2: Create shader module
-        std::cout << "[GPU] Step 2: Creating shader module..." << std::endl;
-
-        if (impl_->bootstrap_shader.empty()) {
-            std::cerr << "[GPU] Bootstrap shader not loaded, falling back to CPU" << std::endl;
-            gpu_ok = false;
-        }
-
-        if (gpu_ok) {
-            uint32_t shader_module = __wasi_webgpu_create_shader_module(
-                impl_->device_id,
-                impl_->bootstrap_shader.c_str(),
-                static_cast<uint32_t>(impl_->bootstrap_shader.size())
-            );
-
-            if (shader_module == 0) {
-                std::cerr << "[GPU] Failed to create shader module, falling back to CPU" << std::endl;
-                gpu_ok = false;
-            } else {
-                std::cout << "[GPU] Shader module ID: " << shader_module << std::endl;
-
-                // Step 3: Create bind group layout
-                std::cout << "[GPU] Step 3: Creating bind group layout..." << std::endl;
-
-                uint32_t bind_group_layout = __wasi_webgpu_create_bind_group_layout(
-                    impl_->device_id,
-                    2, // 2 bindings: params (uniform) and output (storage)
-                    0  // entries_ptr not used in simplified implementation
-                );
-                std::cout << "[GPU] Bind group layout ID: " << bind_group_layout << std::endl;
-
-                // Step 4: Create compute pipeline
-                std::cout << "[GPU] Step 4: Creating compute pipeline..." << std::endl;
-                
-                const char* entry_point = "main";
-                uint32_t compute_pipeline = __wasi_webgpu_create_compute_pipeline(
-                    impl_->device_id,
-                    shader_module,
-                    entry_point,
-                    std::strlen(entry_point),
-                    bind_group_layout
-                );
-
-                if (compute_pipeline == 0) {
-                    std::cerr << "[GPU] Failed to create compute pipeline, falling back to CPU" << std::endl;
-                    gpu_ok = false;
-                } else {
-                    std::cout << "[GPU]   Compute pipeline ID: " << compute_pipeline << std::endl;
-
-                    // Step 5: Create bind group
-                    std::cout << "[GPU] Step 5: Creating bind group..." << std::endl;
-                    
-                    // IMPORTANT: Pass gpu_buffer first to match shader binding order:
-                    // @binding(0) = indices (gpu_buffer)
-                    // @binding(1) = params (params_buffer)
-                    uint32_t bind_group = __wasi_webgpu_create_bind_group(
-                        impl_->device_id,
-                        bind_group_layout,
-                        2, // 2 buffers
-                        gpu_buffer // First buffer ID - MUST be gpu_buffer for binding 0!
-                    );
-                    std::cout << "[GPU]   Bind group ID: " << bind_group << std::endl;
-
-                    // Step 6: Create command encoder
-                    std::cout << "[GPU] Step 6: Creating command encoder..." << std::endl;
-
-                    uint32_t command_encoder = __wasi_webgpu_create_command_encoder(impl_->device_id);
-                    std::cout << "[GPU] Command encoder ID: " << command_encoder << std::endl;
-
-                    // Step 7: Dispatch compute
-                    std::cout << "[GPU] Step 7: Dispatching compute shader..." << std::endl;
-
-                    // Calculate workgroup count (256 threads per workgroup - matches WGSL)
-                    uint32_t workgroup_size = 256;
-                    uint32_t workgroup_count = (static_cast<uint32_t>(n_samples) + workgroup_size - 1) / workgroup_size;
-
-                    __wasi_webgpu_dispatch_compute(
-                        command_encoder,
-                        compute_pipeline,
-                        bind_group,
-                        workgroup_count,
-                        1,
-                        1
-                    );
-                    std::cout << "[GPU]   Dispatched " << workgroup_count << " workgroups" << std::endl;
-
-                    // Step 8: Copy from GPU buffer to staging buffer
-                    std::cout << "[GPU] Step 8: Copying GPU buffer to staging buffer..." << std::endl;
-                    
-                    __wasi_webgpu_copy_buffer_to_buffer(
-                        command_encoder,
-                        gpu_buffer,      // source
-                        0,               // src offset
-                        staging_buffer,  // destination
-                        0,               // dst offset
-                        output_size      // size
-                    );
-                    std::cout << "[GPU]   Copy command added" << std::endl;
-
-                    // Step 9: Submit commands
-                    std::cout << "[GPU] Step 9: Submitting commands to GPU..." << std::endl;
-
-                    __wasi_webgpu_submit_commands(impl_->queue_id, command_encoder);
-                    std::cout << "[GPU]   Commands submitted" << std::endl;
-
-                    // Step 10: Map staging buffer for reading
-                    std::cout << "[GPU] Step 10: Mapping staging buffer for readback..." << std::endl;
-
-                    __wasi_webgpu_buffer_map_async(
-                        staging_buffer,
-                        1, // READ mode
-                        0,
-                        output_size,
-                        0, // callback_ptr (not used)
-                        0  // callback_len (not used)
-                    );
-                    std::cout << "[GPU]   Staging buffer mapped" << std::endl;
-
-                    // Step 11: Read results from staging buffer
-                    std::cout << "[GPU] Step 11: Reading results from staging buffer..." << std::endl;
-
-                    indices.resize(n_samples);
-                    __wasi_webgpu_buffer_get_mapped_range(
-                        staging_buffer,
-                        0,
-                        output_size,
-                        reinterpret_cast<uint32_t>(indices.data())
-                    );
-                    std::cout << "[GPU]   Read " << indices.size() << " indices" << std::endl;
-
-                    // Step 12: Unmap staging buffer
-                    std::cout << "[GPU] Step 12: Unmapping staging buffer..." << std::endl;
-                    __wasi_webgpu_buffer_unmap(staging_buffer);
-                    std::cout << "[GPU]   Staging buffer unmapped" << std::endl;
-
-                    std::cout << "[GPU] GPU pipeline completed successfully!" << std::endl;
-                    std::cout << "[GPU] Generated " << indices.size() << " bootstrap indices" << std::endl;
-                    return indices;
-                }
-            }
-        }
+std::vector<uint32_t> GpuExecutor::bootstrap_sample(size_t n_samples, uint32_t seed, uint32_t max_index) {
+    if (!available_) {
+        return bootstrap_sample_cpu(n_samples, seed, max_index);
     }
-
-    // CPU fallback
-    std::cerr << "[GPU] Falling back to CPU implementation" << std::endl;
-
-    auto xorshift = [](uint32_t x) -> uint32_t {
-        x ^= x << 13;
-        x ^= x >> 17;
-        x ^= x << 5;
-        return x;
-    };
-
-    for (size_t i = 0; i < n_samples; ++i) {
-        uint32_t rng_state = seed + i * 747796405u + 2891336453u;
-        rng_state = xorshift(rng_state);
-        rng_state = xorshift(rng_state);
-        uint32_t idx = rng_state % n_samples;
-        indices.push_back(idx);
+    
+    // Create output buffer
+    uint64_t output_size = n_samples * sizeof(uint32_t);
+    uint32_t output_buffer = create_buffer(
+        output_size, 
+        WASI_GPU_BUFFER_USAGE_STORAGE | WASI_GPU_BUFFER_USAGE_COPY_SRC
+    );
+    
+    if (output_buffer == 0) {
+        return bootstrap_sample_cpu(n_samples, seed, max_index);
     }
-
+    
+    // Set up parameters
+    wasi_gpu_bootstrap_params_t params;
+    params.n_samples = static_cast<uint32_t>(n_samples);
+    params.seed = seed;
+    params.max_index = max_index;
+    
+    // Call kernel
+    wasi_gpu_error err = wasi_gpu_kernel_bootstrap_sample(&params, output_buffer);
+    
+    if (err != WASI_GPU_SUCCESS) {
+        destroy_buffer(output_buffer);
+        return bootstrap_sample_cpu(n_samples, seed, max_index);
+    }
+    
+    // Read results
+    std::vector<uint32_t> indices(n_samples);
+    if (!read_buffer(output_buffer, 0, indices.data(), output_size)) {
+        destroy_buffer(output_buffer);
+        return bootstrap_sample_cpu(n_samples, seed, max_index);
+    }
+    
+    // Cleanup
+    destroy_buffer(output_buffer);
+    
     return indices;
 }
 
 std::pair<float, float> GpuExecutor::find_best_split(
-    const std::vector<float>& data,
-    const std::vector<float>& labels,
     const std::vector<uint32_t>& indices,
-    size_t n_features,
-    size_t feature_idx
+    size_t feature_idx,
+    const std::vector<float>& thresholds,
+    uint32_t data_buffer,
+    uint32_t labels_buffer,
+    size_t n_features
 ) {
-    // CPU implementation (GPU version TODO)
-    std::vector<float> values;
-    values.reserve(indices.size());
-    for (uint32_t idx : indices) {
-        values.push_back(data[idx * n_features + feature_idx]);
-    }
-    
-    std::sort(values.begin(), values.end());
-    values.erase(std::unique(values.begin(), values.end()), values.end());
-    
-    if (values.size() < 2) {
+    if (!available_ || thresholds.empty()) {
         return {0.0f, std::numeric_limits<float>::infinity()};
     }
+    
+    size_t n_thresholds = thresholds.size();
+    
+    // Create indices buffer
+    uint64_t indices_size = indices.size() * sizeof(uint32_t);
+    uint32_t indices_buffer = create_buffer(
+        indices_size,
+        WASI_GPU_BUFFER_USAGE_STORAGE | WASI_GPU_BUFFER_USAGE_COPY_DST
+    );
+    if (indices_buffer == 0) return {0.0f, std::numeric_limits<float>::infinity()};
+    write_buffer(indices_buffer, 0, indices.data(), indices_size);
+    
+    // Create thresholds buffer
+    uint64_t thresholds_size = n_thresholds * sizeof(float);
+    uint32_t thresholds_buffer = create_buffer(
+        thresholds_size,
+        WASI_GPU_BUFFER_USAGE_STORAGE | WASI_GPU_BUFFER_USAGE_COPY_DST
+    );
+    if (thresholds_buffer == 0) {
+        destroy_buffer(indices_buffer);
+        return {0.0f, std::numeric_limits<float>::infinity()};
+    }
+    write_buffer(thresholds_buffer, 0, thresholds.data(), thresholds_size);
+    
+    // Create output scores buffer
+    uint64_t scores_size = n_thresholds * sizeof(float);
+    uint32_t scores_buffer = create_buffer(
+        scores_size,
+        WASI_GPU_BUFFER_USAGE_STORAGE | WASI_GPU_BUFFER_USAGE_COPY_SRC
+    );
+    if (scores_buffer == 0) {
+        destroy_buffer(indices_buffer);
+        destroy_buffer(thresholds_buffer);
+        return {0.0f, std::numeric_limits<float>::infinity()};
+    }
+    
+    // Set up parameters
+    wasi_gpu_find_split_params_t params;
+    params.n_samples = static_cast<uint32_t>(indices.size());
+    params.n_features = static_cast<uint32_t>(n_features);
+    params.feature_idx = static_cast<uint32_t>(feature_idx);
+    params.n_thresholds = static_cast<uint32_t>(n_thresholds);
+    
+    // Call kernel
+    wasi_gpu_error err = wasi_gpu_kernel_find_split(
+        &params,
+        data_buffer,
+        labels_buffer,
+        indices_buffer,
+        thresholds_buffer,
+        scores_buffer
+    );
     
     float best_threshold = 0.0f;
     float best_score = std::numeric_limits<float>::infinity();
     
-    for (size_t i = 0; i + 1 < values.size(); ++i) {
-        float threshold = (values[i] + values[i + 1]) / 2.0f;
-        
-        float left_sum = 0.0f, right_sum = 0.0f;
-        size_t left_count = 0, right_count = 0;
-        
-        for (uint32_t idx : indices) {
-            float val = data[idx * n_features + feature_idx];
-            float label = labels[idx];
-            
-            if (val <= threshold) {
-                left_sum += label;
-                left_count++;
-            } else {
-                right_sum += label;
-                right_count++;
+    if (err == WASI_GPU_SUCCESS) {
+        // Read scores
+        std::vector<float> scores(n_thresholds);
+        if (read_buffer(scores_buffer, 0, scores.data(), scores_size)) {
+            // Find best
+            for (size_t i = 0; i < n_thresholds; ++i) {
+                if (scores[i] < best_score) {
+                    best_score = scores[i];
+                    best_threshold = thresholds[i];
+                }
             }
         }
-        
-        if (left_count == 0 || right_count == 0) continue;
-        
-        float left_mean = left_sum / left_count;
-        float right_mean = right_sum / right_count;
-        
-        float mse = 0.0f;
-        for (uint32_t idx : indices) {
-            float val = data[idx * n_features + feature_idx];
-            float label = labels[idx];
-            float mean = (val <= threshold) ? left_mean : right_mean;
-            float diff = label - mean;
-            mse += diff * diff;
-        }
-        
-        if (mse < best_score) {
-            best_score = mse;
-            best_threshold = threshold;
-        }
     }
+    
+    // Cleanup
+    destroy_buffer(indices_buffer);
+    destroy_buffer(thresholds_buffer);
+    destroy_buffer(scores_buffer);
     
     return {best_threshold, best_score};
 }
@@ -555,10 +229,172 @@ std::vector<float> GpuExecutor::average_predictions(
     size_t n_samples,
     size_t n_trees
 ) {
-    std::cout << "[GPU] average_predictions (n_samples=" << n_samples 
-              << ", n_trees=" << n_trees << ")" << std::endl;
+    if (!available_) {
+        return average_predictions_cpu(tree_predictions, n_samples, n_trees);
+    }
     
-    // CPU implementation for now
+    // Create input buffer
+    uint64_t input_size = tree_predictions.size() * sizeof(float);
+    uint32_t input_buffer = create_buffer(
+        input_size,
+        WASI_GPU_BUFFER_USAGE_STORAGE | WASI_GPU_BUFFER_USAGE_COPY_DST
+    );
+    if (input_buffer == 0) {
+        return average_predictions_cpu(tree_predictions, n_samples, n_trees);
+    }
+    write_buffer(input_buffer, 0, tree_predictions.data(), input_size);
+    
+    // Create output buffer
+    uint64_t output_size = n_samples * sizeof(float);
+    uint32_t output_buffer = create_buffer(
+        output_size,
+        WASI_GPU_BUFFER_USAGE_STORAGE | WASI_GPU_BUFFER_USAGE_COPY_SRC
+    );
+    if (output_buffer == 0) {
+        destroy_buffer(input_buffer);
+        return average_predictions_cpu(tree_predictions, n_samples, n_trees);
+    }
+    
+    // Set up parameters
+    wasi_gpu_average_params_t params;
+    params.n_trees = static_cast<uint32_t>(n_trees);
+    params.n_samples = static_cast<uint32_t>(n_samples);
+    
+    // Call kernel
+    wasi_gpu_error err = wasi_gpu_kernel_average(&params, input_buffer, output_buffer);
+    
+    std::vector<float> result;
+    
+    if (err == WASI_GPU_SUCCESS) {
+        result.resize(n_samples);
+        if (!read_buffer(output_buffer, 0, result.data(), output_size)) {
+            result = average_predictions_cpu(tree_predictions, n_samples, n_trees);
+        }
+    } else {
+        result = average_predictions_cpu(tree_predictions, n_samples, n_trees);
+    }
+    
+    // Cleanup
+    destroy_buffer(input_buffer);
+    destroy_buffer(output_buffer);
+    
+    return result;
+}
+
+std::vector<float> GpuExecutor::matmul(
+    const std::vector<float>& a,
+    const std::vector<float>& b,
+    size_t m, size_t k, size_t n
+) {
+    std::vector<float> c(m * n, 0.0f);
+    
+    if (!available_) {
+        // CPU fallback
+        for (size_t i = 0; i < m; ++i) {
+            for (size_t j = 0; j < n; ++j) {
+                float sum = 0.0f;
+                for (size_t l = 0; l < k; ++l) {
+                    sum += a[i * k + l] * b[l * n + j];
+                }
+                c[i * n + j] = sum;
+            }
+        }
+        return c;
+    }
+    
+    // Create buffers
+    uint32_t a_buffer = create_buffer(a.size() * sizeof(float), 
+        WASI_GPU_BUFFER_USAGE_STORAGE | WASI_GPU_BUFFER_USAGE_COPY_DST);
+    uint32_t b_buffer = create_buffer(b.size() * sizeof(float),
+        WASI_GPU_BUFFER_USAGE_STORAGE | WASI_GPU_BUFFER_USAGE_COPY_DST);
+    uint32_t c_buffer = create_buffer(c.size() * sizeof(float),
+        WASI_GPU_BUFFER_USAGE_STORAGE | WASI_GPU_BUFFER_USAGE_COPY_SRC | WASI_GPU_BUFFER_USAGE_COPY_DST);
+    
+    if (a_buffer == 0 || b_buffer == 0 || c_buffer == 0) {
+        destroy_buffer(a_buffer);
+        destroy_buffer(b_buffer);
+        destroy_buffer(c_buffer);
+        // CPU fallback
+        for (size_t i = 0; i < m; ++i) {
+            for (size_t j = 0; j < n; ++j) {
+                float sum = 0.0f;
+                for (size_t l = 0; l < k; ++l) {
+                    sum += a[i * k + l] * b[l * n + j];
+                }
+                c[i * n + j] = sum;
+            }
+        }
+        return c;
+    }
+    
+    write_buffer(a_buffer, 0, a.data(), a.size() * sizeof(float));
+    write_buffer(b_buffer, 0, b.data(), b.size() * sizeof(float));
+    write_buffer(c_buffer, 0, c.data(), c.size() * sizeof(float)); // Zero init
+    
+    // Set up parameters
+    wasi_gpu_matmul_params_t params;
+    params.m = static_cast<uint32_t>(m);
+    params.k = static_cast<uint32_t>(k);
+    params.n = static_cast<uint32_t>(n);
+    params.trans_a = 0;
+    params.trans_b = 0;
+    params.alpha = 1.0f;
+    params.beta = 0.0f;
+    
+    // Call kernel
+    wasi_gpu_error err = wasi_gpu_kernel_matmul(&params, a_buffer, b_buffer, c_buffer);
+    
+    if (err == WASI_GPU_SUCCESS) {
+        read_buffer(c_buffer, 0, c.data(), c.size() * sizeof(float));
+    } else {
+        // CPU fallback
+        for (size_t i = 0; i < m; ++i) {
+            for (size_t j = 0; j < n; ++j) {
+                float sum = 0.0f;
+                for (size_t l = 0; l < k; ++l) {
+                    sum += a[i * k + l] * b[l * n + j];
+                }
+                c[i * n + j] = sum;
+            }
+        }
+    }
+    
+    // Cleanup
+    destroy_buffer(a_buffer);
+    destroy_buffer(b_buffer);
+    destroy_buffer(c_buffer);
+    
+    return c;
+}
+
+// CPU Fallback implementations
+std::vector<uint32_t> GpuExecutor::bootstrap_sample_cpu(size_t n_samples, uint32_t seed, uint32_t max_index) {
+    std::vector<uint32_t> indices;
+    indices.reserve(n_samples);
+    
+    auto xorshift = [](uint32_t x) -> uint32_t {
+        x ^= x << 13;
+        x ^= x >> 17;
+        x ^= x << 5;
+        return x;
+    };
+    
+    for (size_t i = 0; i < n_samples; ++i) {
+        uint32_t rng_state = seed + static_cast<uint32_t>(i) * 747796405u + 2891336453u;
+        rng_state = xorshift(rng_state);
+        rng_state = xorshift(rng_state);
+        uint32_t idx = rng_state % max_index;
+        indices.push_back(idx);
+    }
+    
+    return indices;
+}
+
+std::vector<float> GpuExecutor::average_predictions_cpu(
+    const std::vector<float>& tree_predictions,
+    size_t n_samples,
+    size_t n_trees
+) {
     std::vector<float> result;
     result.reserve(n_samples);
     
@@ -573,65 +409,98 @@ std::vector<float> GpuExecutor::average_predictions(
     return result;
 }
 
-std::vector<float> GpuExecutor::predict(
-    const RandomForest& forest,
-    const std::vector<float>& input_data,
+// ═══════════════════════════════════════════════════════════════════════════
+// GpuTrainer Implementation
+// ═══════════════════════════════════════════════════════════════════════════
+
+GpuTrainer::GpuTrainer() 
+    : data_buffer_(0), labels_buffer_(0), n_samples_(0), n_features_(0) {
+}
+
+GpuTrainer::~GpuTrainer() {
+    cleanup();
+}
+
+bool GpuTrainer::upload_training_data(
+    const std::vector<float>& data,
+    const std::vector<float>& labels,
+    size_t n_samples,
     size_t n_features
 ) {
-    size_t n_samples = input_data.size() / n_features;
-    
-    std::cout << "[GPU] predict (n_samples=" << n_samples << ")" << std::endl;
-    
-    // Get predictions from all trees
-    std::vector<float> tree_predictions;
-    tree_predictions.reserve(n_samples * forest.n_trees());
-    
-    for (size_t i = 0; i < n_samples; ++i) {
-        const float* sample = &input_data[i * n_features];
-        auto preds = forest.get_tree_predictions(sample);
-        tree_predictions.insert(tree_predictions.end(), preds.begin(), preds.end());
-    }
-    
-    return average_predictions(tree_predictions, n_samples, forest.n_trees());
-}
-
-bool GpuExecutor::compile_shader(const std::string& shader_code, 
-                                 const std::string& entry_point) {
-    std::cout << "[GPU] compile_shader: " << entry_point << std::endl;
-    
-    if (!available_) {
+    if (!executor_.is_available()) {
+        std::cerr << "[GpuTrainer] GPU not available" << std::endl;
         return false;
     }
     
-    uint32_t shader_id = __wasi_webgpu_create_shader_module(
-        impl_->device_id,
-        shader_code.c_str(),
-        static_cast<uint32_t>(shader_code.size())
+    n_samples_ = n_samples;
+    n_features_ = n_features;
+    
+    // Create and upload data buffer
+    uint64_t data_size = data.size() * sizeof(float);
+    data_buffer_ = executor_.create_buffer(
+        data_size,
+        WASI_GPU_BUFFER_USAGE_STORAGE | WASI_GPU_BUFFER_USAGE_COPY_DST
     );
-
-    if (shader_id == 0) {
-        std::cerr << "[GPU] Failed to compile shader" << std::endl;
+    if (data_buffer_ == 0) return false;
+    executor_.write_buffer(data_buffer_, 0, data.data(), data_size);
+    
+    // Create and upload labels buffer
+    uint64_t labels_size = labels.size() * sizeof(float);
+    labels_buffer_ = executor_.create_buffer(
+        labels_size,
+        WASI_GPU_BUFFER_USAGE_STORAGE | WASI_GPU_BUFFER_USAGE_COPY_DST
+    );
+    if (labels_buffer_ == 0) {
+        executor_.destroy_buffer(data_buffer_);
+        data_buffer_ = 0;
         return false;
     }
-
-    std::cout << "[GPU] Shader module ID: " << shader_id << std::endl;
+    executor_.write_buffer(labels_buffer_, 0, labels.data(), labels_size);
+    
+    std::cerr << "[GpuTrainer] Uploaded " << n_samples << " samples x " 
+              << n_features << " features to GPU" << std::endl;
+    
     return true;
 }
 
-bool GpuExecutor::execute_compute(size_t workgroup_count_x, 
-                                  size_t workgroup_count_y,
-                                  size_t workgroup_count_z) {
-    std::cout << "[GPU] execute_compute: " 
-              << workgroup_count_x << "x" 
-              << workgroup_count_y << "x" 
-              << workgroup_count_z << std::endl;
-    
-    if (!available_) {
-        return false;
+std::vector<uint32_t> GpuTrainer::bootstrap_sample(size_t n_samples, uint32_t seed) {
+    return executor_.bootstrap_sample(n_samples, seed, static_cast<uint32_t>(n_samples_));
+}
+
+std::pair<float, float> GpuTrainer::find_best_split(
+    const std::vector<uint32_t>& indices,
+    size_t feature_idx,
+    const std::vector<float>& thresholds
+) {
+    return executor_.find_best_split(
+        indices, feature_idx, thresholds,
+        data_buffer_, labels_buffer_, n_features_
+    );
+}
+
+void GpuTrainer::cleanup() {
+    if (data_buffer_ != 0) {
+        executor_.destroy_buffer(data_buffer_);
+        data_buffer_ = 0;
     }
-    
-    // Implementation would use the new pipeline functions
-    return true;
+    if (labels_buffer_ != 0) {
+        executor_.destroy_buffer(labels_buffer_);
+        labels_buffer_ = 0;
+    }
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// GpuPredictor Implementation
+// ═══════════════════════════════════════════════════════════════════════════
+
+GpuPredictor::GpuPredictor() {}
+
+std::vector<float> GpuPredictor::average_predictions(
+    const std::vector<float>& tree_predictions,
+    size_t n_samples,
+    size_t n_trees
+) {
+    return executor_.average_predictions(tree_predictions, n_samples, n_trees);
 }
 
 } // namespace ml

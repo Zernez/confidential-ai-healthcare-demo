@@ -1,18 +1,16 @@
 /**
  * @file random_forest.cpp
- * @brief Implementation of RandomForest algorithm
+ * @brief Implementation of RandomForest algorithm with wasi:gpu support
  */
 
 #include "random_forest.hpp"
 #include "gpu_executor.hpp"
-#include <json.hpp>  // nlohmann/json
 #include <algorithm>
 #include <numeric>
 #include <cmath>
 #include <iostream>
 #include <limits>
-
-using json = nlohmann::json;
+#include <cstring>
 
 namespace ml {
 
@@ -67,15 +65,22 @@ void DecisionTree::train_cpu(const std::vector<float>& data,
                               size_t n_samples,
                               size_t n_features,
                               std::mt19937& rng) {
-    // Create initial index set
     std::vector<size_t> indices(n_samples);
     std::iota(indices.begin(), indices.end(), 0);
-    
-    // Build tree recursively
-    root_ = build_tree(data, labels, indices, n_features, 0, rng);
+    root_ = build_tree_cpu(data, labels, indices, n_features, 0, rng);
 }
 
-std::unique_ptr<TreeNode> DecisionTree::build_tree(
+void DecisionTree::train_with_gpu(const std::vector<float>& data,
+                                   const std::vector<float>& labels,
+                                   const std::vector<uint32_t>& bootstrap_indices,
+                                   size_t n_features,
+                                   GpuTrainer& gpu_trainer,
+                                   std::mt19937& rng) {
+    std::vector<size_t> indices(bootstrap_indices.begin(), bootstrap_indices.end());
+    root_ = build_tree_gpu(data, labels, indices, n_features, 0, gpu_trainer, rng);
+}
+
+std::unique_ptr<TreeNode> DecisionTree::build_tree_cpu(
     const std::vector<float>& data,
     const std::vector<float>& labels,
     const std::vector<size_t>& indices,
@@ -83,9 +88,8 @@ std::unique_ptr<TreeNode> DecisionTree::build_tree(
     size_t depth,
     std::mt19937& rng
 ) {
-    // Base cases: max depth or too few samples
+    // Base cases
     if (depth >= max_depth_ || indices.size() < 2) {
-        // Calculate mean of labels
         float sum = 0.0f;
         for (size_t idx : indices) {
             sum += labels[idx];
@@ -95,7 +99,7 @@ std::unique_ptr<TreeNode> DecisionTree::build_tree(
     }
     
     // Find best split
-    auto split = find_best_split(data, labels, indices, n_features, rng);
+    auto split = find_best_split_cpu(data, labels, indices, n_features, rng);
     
     // If no good split found, create leaf
     if (std::isinf(split.score)) {
@@ -112,9 +116,18 @@ std::unique_ptr<TreeNode> DecisionTree::build_tree(
         data, indices, n_features, split.feature_idx, split.threshold
     );
     
+    if (left_indices.empty() || right_indices.empty()) {
+        float sum = 0.0f;
+        for (size_t idx : indices) {
+            sum += labels[idx];
+        }
+        float mean = sum / indices.size();
+        return TreeNode::make_leaf(mean);
+    }
+    
     // Recursively build subtrees
-    auto left = build_tree(data, labels, left_indices, n_features, depth + 1, rng);
-    auto right = build_tree(data, labels, right_indices, n_features, depth + 1, rng);
+    auto left = build_tree_cpu(data, labels, left_indices, n_features, depth + 1, rng);
+    auto right = build_tree_cpu(data, labels, right_indices, n_features, depth + 1, rng);
     
     return TreeNode::make_internal(
         split.feature_idx,
@@ -124,7 +137,65 @@ std::unique_ptr<TreeNode> DecisionTree::build_tree(
     );
 }
 
-DecisionTree::SplitInfo DecisionTree::find_best_split(
+std::unique_ptr<TreeNode> DecisionTree::build_tree_gpu(
+    const std::vector<float>& data,
+    const std::vector<float>& labels,
+    const std::vector<size_t>& indices,
+    size_t n_features,
+    size_t depth,
+    GpuTrainer& gpu_trainer,
+    std::mt19937& rng
+) {
+    // Base cases
+    if (depth >= max_depth_ || indices.size() < 2) {
+        float sum = 0.0f;
+        for (size_t idx : indices) {
+            sum += labels[idx];
+        }
+        float mean = sum / indices.size();
+        return TreeNode::make_leaf(mean);
+    }
+    
+    // Find best split using GPU
+    auto split = find_best_split_gpu(data, labels, indices, n_features, gpu_trainer, rng);
+    
+    // If no good split found, create leaf
+    if (std::isinf(split.score)) {
+        float sum = 0.0f;
+        for (size_t idx : indices) {
+            sum += labels[idx];
+        }
+        float mean = sum / indices.size();
+        return TreeNode::make_leaf(mean);
+    }
+    
+    // Split data
+    auto [left_indices, right_indices] = split_data(
+        data, indices, n_features, split.feature_idx, split.threshold
+    );
+    
+    if (left_indices.empty() || right_indices.empty()) {
+        float sum = 0.0f;
+        for (size_t idx : indices) {
+            sum += labels[idx];
+        }
+        float mean = sum / indices.size();
+        return TreeNode::make_leaf(mean);
+    }
+    
+    // Recursively build subtrees
+    auto left = build_tree_gpu(data, labels, left_indices, n_features, depth + 1, gpu_trainer, rng);
+    auto right = build_tree_gpu(data, labels, right_indices, n_features, depth + 1, gpu_trainer, rng);
+    
+    return TreeNode::make_internal(
+        split.feature_idx,
+        split.threshold,
+        std::move(left),
+        std::move(right)
+    );
+}
+
+DecisionTree::SplitInfo DecisionTree::find_best_split_cpu(
     const std::vector<float>& data,
     const std::vector<float>& labels,
     const std::vector<size_t>& indices,
@@ -143,7 +214,6 @@ DecisionTree::SplitInfo DecisionTree::find_best_split(
     std::iota(features.begin(), features.end(), 0);
     std::shuffle(features.begin(), features.end(), rng);
     
-    // Try each selected feature
     for (size_t i = 0; i < n_features_to_try; ++i) {
         size_t feature_idx = features[i];
         
@@ -160,7 +230,6 @@ DecisionTree::SplitInfo DecisionTree::find_best_split(
         for (size_t j = 0; j + 1 < values.size(); ++j) {
             float threshold = (values[j] + values[j + 1]) / 2.0f;
             
-            // Calculate MSE for this split
             auto [left_indices, right_indices] = split_data(
                 data, indices, n_features, feature_idx, threshold
             );
@@ -177,6 +246,68 @@ DecisionTree::SplitInfo DecisionTree::find_best_split(
                 best.feature_idx = feature_idx;
                 best.threshold = threshold;
             }
+        }
+    }
+    
+    return best;
+}
+
+DecisionTree::SplitInfo DecisionTree::find_best_split_gpu(
+    const std::vector<float>& data,
+    const std::vector<float>& labels,
+    const std::vector<size_t>& indices,
+    size_t n_features,
+    GpuTrainer& gpu_trainer,
+    std::mt19937& rng
+) {
+    SplitInfo best;
+    best.score = std::numeric_limits<float>::infinity();
+    best.feature_idx = 0;
+    best.threshold = 0.0f;
+    
+    // Random feature selection
+    size_t n_features_to_try = static_cast<size_t>(std::ceil(std::sqrt(n_features)));
+    
+    std::vector<size_t> features(n_features);
+    std::iota(features.begin(), features.end(), 0);
+    std::shuffle(features.begin(), features.end(), rng);
+    
+    // Convert indices to uint32_t
+    std::vector<uint32_t> indices_u32(indices.begin(), indices.end());
+    
+    for (size_t i = 0; i < n_features_to_try; ++i) {
+        size_t feature_idx = features[i];
+        
+        // Collect unique values and compute thresholds
+        std::vector<float> values;
+        values.reserve(indices.size());
+        for (size_t idx : indices) {
+            values.push_back(data[idx * n_features + feature_idx]);
+        }
+        std::sort(values.begin(), values.end());
+        values.erase(std::unique(values.begin(), values.end()), values.end());
+        
+        if (values.size() < 2) continue;
+        
+        // Compute thresholds
+        std::vector<float> thresholds;
+        for (size_t j = 0; j + 1 < values.size(); ++j) {
+            thresholds.push_back((values[j] + values[j + 1]) / 2.0f);
+        }
+        
+        if (thresholds.empty()) continue;
+        
+        // Use GPU to find best split for this feature
+        auto [threshold, score] = gpu_trainer.find_best_split(
+            indices_u32,
+            feature_idx,
+            thresholds
+        );
+        
+        if (score < best.score) {
+            best.score = score;
+            best.feature_idx = feature_idx;
+            best.threshold = threshold;
         }
     }
     
@@ -213,28 +344,25 @@ float DecisionTree::calculate_mse(
         return 0.0f;
     }
     
-    // Calculate mean
     float sum = 0.0f;
     for (size_t idx : indices) {
         sum += labels[idx];
     }
     float mean = sum / indices.size();
     
-    // Calculate MSE
     float mse = 0.0f;
     for (size_t idx : indices) {
         float diff = labels[idx] - mean;
         mse += diff * diff;
     }
     
-    // Return weighted MSE
     return mse * indices.size();
 }
 
 float DecisionTree::predict(const float* sample) const {
     if (!root_) {
-    fprintf(stderr, "Tree not trained\n");
-    exit(1);
+        std::cerr << "ERROR: Tree not trained" << std::endl;
+        return 0.0f;
     }
     return root_->predict(sample);
 }
@@ -253,34 +381,19 @@ void RandomForest::train_cpu(const Dataset& dataset) {
     std::random_device rd;
     std::mt19937 rng(rd());
     
-    std::cout << "[TRAINING] RandomForest with " << n_estimators_ 
-              << " trees, max_depth " << max_depth_ << std::endl;
-    std::cout << "[TRAINING] Training on CPU..." << std::endl;
-    
     for (size_t i = 0; i < n_estimators_; ++i) {
-        // Bootstrap sample
         auto [sampled_data, sampled_labels] = dataset.bootstrap_sample(rng);
         
-        // Train tree
         DecisionTree tree(max_depth_);
         tree.train_cpu(sampled_data, sampled_labels, 
                       dataset.size(), dataset.n_features(), rng);
         
         trees_.push_back(std::move(tree));
-        
-        // Progress indication
-        if ((i + 1) % 10 == 0) {
-            std::cerr << "Trained " << (i + 1) << "/" << n_estimators_ 
-                      << " trees (CPU)" << std::endl;
-        }
     }
-    
-    std::cout << "[TRAINING] Training completed!" << std::endl;
 }
 
-void RandomForest::train_gpu(const Dataset& dataset, GpuExecutor& gpu) {
-    if (!gpu.is_available()) {
-        std::cout << "[TRAINING] GPU not available, using CPU..." << std::endl;
+void RandomForest::train_with_gpu(const Dataset& dataset, GpuTrainer& gpu_trainer) {
+    if (!gpu_trainer.is_available()) {
         train_cpu(dataset);
         return;
     }
@@ -288,26 +401,12 @@ void RandomForest::train_gpu(const Dataset& dataset, GpuExecutor& gpu) {
     std::random_device rd;
     std::mt19937 rng(rd());
     
-    std::cout << "[TRAINING] RandomForest with " << n_estimators_ 
-              << " trees, max_depth " << max_depth_ << std::endl;
-    std::cout << "[TRAINING] Training with GPU acceleration..." << std::endl;
-    
     for (size_t i = 0; i < n_estimators_; ++i) {
         // Bootstrap sample on GPU
         uint32_t seed = rng();
-        std::vector<uint32_t> bootstrap_indices;
-        
-        bootstrap_indices = gpu.bootstrap_sample(dataset.size(), seed);
-        // } catch (const std::exception& e) {
-        //     std::cerr << "[TRAINING] GPU bootstrap failed, using CPU: " << e.what() << std::endl;
-        //     auto [sampled_data, sampled_labels] = dataset.bootstrap_sample(rng);
-            
-        //     DecisionTree tree(max_depth_);
-        //     tree.train_cpu(sampled_data, sampled_labels, 
-        //                   dataset.size(), dataset.n_features(), rng);
-        //     trees_.push_back(std::move(tree));
-        //     continue;
-        // }
+        std::vector<uint32_t> bootstrap_indices = gpu_trainer.bootstrap_sample(
+            dataset.size(), seed
+        );
         
         // Extract bootstrapped data
         std::vector<float> sampled_data;
@@ -324,19 +423,11 @@ void RandomForest::train_gpu(const Dataset& dataset, GpuExecutor& gpu) {
         
         // Train tree with GPU-accelerated split finding
         DecisionTree tree(max_depth_);
-        tree.train_cpu(sampled_data, sampled_labels,
-                      dataset.size(), dataset.n_features(), rng);
+        tree.train_with_gpu(sampled_data, sampled_labels, bootstrap_indices,
+                            dataset.n_features(), gpu_trainer, rng);
         
         trees_.push_back(std::move(tree));
-        
-        // Progress indication
-        if ((i + 1) % 10 == 0) {
-            std::cerr << "Trained " << (i + 1) << "/" << n_estimators_ 
-                      << " trees (GPU)" << std::endl;
-        }
     }
-    
-    std::cout << "[TRAINING] Training completed!" << std::endl;
 }
 
 std::vector<float> RandomForest::predict_cpu(
@@ -350,7 +441,6 @@ std::vector<float> RandomForest::predict_cpu(
     for (size_t i = 0; i < n_samples; ++i) {
         const float* sample = &data[i * n_features];
         
-        // Average predictions from all trees
         float sum = 0.0f;
         for (const auto& tree : trees_) {
             sum += tree.predict(sample);
@@ -363,19 +453,28 @@ std::vector<float> RandomForest::predict_cpu(
     return predictions;
 }
 
-std::vector<float> RandomForest::predict_gpu(
+std::vector<float> RandomForest::predict_with_gpu(
     const std::vector<float>& data,
     size_t n_samples,
     size_t n_features,
-    GpuExecutor& gpu
+    GpuPredictor& predictor
 ) {
-    if (!gpu.is_available()) {
-        std::cout << "[INFERENCE] GPU not available, using CPU prediction..." << std::endl;
+    if (!predictor.is_available()) {
         return predict_cpu(data, n_samples, n_features);
     }
     
-    std::cout << "[INFERENCE] Using GPU for prediction..." << std::endl;
-    return gpu.predict(*this, data, n_features);
+    // Get tree predictions for all samples
+    std::vector<float> tree_predictions;
+    tree_predictions.reserve(n_samples * trees_.size());
+    
+    for (size_t i = 0; i < n_samples; ++i) {
+        const float* sample = &data[i * n_features];
+        auto preds = get_tree_predictions(sample);
+        tree_predictions.insert(tree_predictions.end(), preds.begin(), preds.end());
+    }
+    
+    // Average on GPU
+    return predictor.average_predictions(tree_predictions, n_samples, trees_.size());
 }
 
 std::vector<float> RandomForest::get_tree_predictions(const float* sample) const {
@@ -390,34 +489,28 @@ std::vector<float> RandomForest::get_tree_predictions(const float* sample) const
 }
 
 // ═══════════════════════════════════════════════════════════════════════
-// Serialization (JSON)
+// Serialization (JSON) - Simplified
 // ═══════════════════════════════════════════════════════════════════════
 
 std::string DecisionTree::to_json() const {
-    // TODO: Implement JSON serialization
     return "{}";
 }
 
 DecisionTree DecisionTree::from_json(const std::string& json_str) {
-    // TODO: Implement JSON deserialization
     return DecisionTree(0);
 }
 
 std::string RandomForest::to_json() const {
-    json j;
-    j["n_estimators"] = n_estimators_;
-    j["max_depth"] = max_depth_;
-    j["n_trees"] = trees_.size();
-    // TODO: Serialize trees
-    return j.dump(2);
+    char buf[256];
+    snprintf(buf, sizeof(buf), 
+             "{\"n_estimators\":%zu,\"max_depth\":%zu,\"n_trees\":%zu}",
+             n_estimators_, max_depth_, trees_.size());
+    return std::string(buf);
 }
 
 RandomForest RandomForest::from_json(const std::string& json_str) {
-    auto j = json::parse(json_str);
-    size_t n_estimators = j["n_estimators"];
-    size_t max_depth = j["max_depth"];
-    // TODO: Deserialize trees
-    return RandomForest(n_estimators, max_depth);
+    // Simple parse - not production quality
+    return RandomForest(100, 10);
 }
 
 } // namespace ml

@@ -1,125 +1,163 @@
-//! WASM ML Benchmark - Diabetes Prediction with TEE Attestation
+//! WASM ML Benchmark - Diabetes Prediction with TEE Attestation and GPU Acceleration
 //! 
-//! This program replicates the exact behavior of the Python ML pipeline
-//! with added TEE (Trusted Execution Environment) attestation:
-//! 
-//! 0. [NEW] Attest VM and GPU before processing sensitive data
-//! 1. Load training data from CSV
-//! 2. Train RandomForest (200 trees, depth 16)
-//! 3. Save model
-//! 4. Load test data from CSV
-//! 5. Load model
-//! 6. Predict on test set
-//! 7. Calculate and print MSE
+//! Unified benchmark with:
+//! - TEE attestation (AMD SEV-SNP / Intel TDX)
+//! - GPU acceleration via wasi:gpu
+//! - Structured JSON output for benchmark aggregation
 
 use std::fs;
 use std::error::Error;
+use std::time::Instant;
 use csv::ReaderBuilder;
 
 // Import from library
 use wasm_ml::random_forest::RandomForest;
 use wasm_ml::data::Dataset;
-use wasm_ml::gpu_compute::GpuExecutor;
+use wasm_ml::gpu_wasi::{GpuTrainer, GpuPredictor, GpuExecutor};
 
 // Import attestation module (only for WASM target)
 #[cfg(target_arch = "wasm32")]
-use wasm_ml::attestation::{attest_vm_token, attest_gpu_token, verify_attestation_token, detect_tee_type};
+use wasm_ml::attestation::{attest_vm_token, attest_gpu_token, detect_tee_type};
 
-// Model parameters - MUST match Python configuration
+// Model parameters - MUST match Python/C++ configuration
 const N_ESTIMATORS: usize = 200;
 const MAX_DEPTH: usize = 16;
 const N_FEATURES: usize = 10;
 const MODEL_PATH: &str = "data/model_diabetes_wasm.bin";
 
-/// Perform TEE attestation before processing sensitive data
-#[cfg(target_arch = "wasm32")]
-fn perform_attestation() -> Result<(), Box<dyn Error>> {
-    println!("\n=== TEE ATTESTATION PHASE ===\n");
+/// Benchmark results structure
+struct BenchmarkResults {
+    language: String,
+    gpu_device: String,
+    gpu_backend: String,
+    tee_type: String,
+    gpu_available: bool,
+    tee_available: bool,
+    attestation_ms: f64,
+    training_ms: f64,
+    inference_ms: f64,
+    mse: f32,
+    train_samples: usize,
+    test_samples: usize,
+}
+
+impl BenchmarkResults {
+    fn new() -> Self {
+        Self {
+            language: "rust".to_string(),
+            gpu_device: String::new(),
+            gpu_backend: String::new(),
+            tee_type: String::new(),
+            gpu_available: false,
+            tee_available: false,
+            attestation_ms: 0.0,
+            training_ms: 0.0,
+            inference_ms: 0.0,
+            mse: 0.0,
+            train_samples: 0,
+            test_samples: 0,
+        }
+    }
     
-    // Step 0: Detect TEE type
-    println!("[🔍 DETECTION] Detecting TEE environment...");
+    fn to_json(&self) -> String {
+        format!(
+            r#"{{"language":"{}","gpu_device":"{}","gpu_backend":"{}","tee_type":"{}","gpu_available":{},"tee_available":{},"attestation_ms":{:.2},"training_ms":{:.2},"inference_ms":{:.2},"mse":{:.4},"train_samples":{},"test_samples":{}}}"#,
+            self.language,
+            self.gpu_device,
+            self.gpu_backend,
+            self.tee_type,
+            self.gpu_available,
+            self.tee_available,
+            self.attestation_ms,
+            self.training_ms,
+            self.inference_ms,
+            self.mse,
+            self.train_samples,
+            self.test_samples
+        )
+    }
+}
+
+/// Timer utility
+struct Timer {
+    start: Instant,
+}
+
+impl Timer {
+    fn new() -> Self {
+        Self {
+            start: Instant::now(),
+        }
+    }
+    
+    fn elapsed_ms(&self) -> f64 {
+        self.start.elapsed().as_secs_f64() * 1000.0
+    }
+}
+
+/// Perform TEE attestation
+#[cfg(target_arch = "wasm32")]
+fn perform_attestation(results: &mut BenchmarkResults) {
+    println!("\n=== TEE ATTESTATION ===");
+    
+    let timer = Timer::new();
+    
+    // Detect TEE type
     match detect_tee_type() {
         Ok(tee_info) => {
-            println!("[✓ TEE] Detected: {}", tee_info.tee_type);
-            println!("  Supports attestation: {}", if tee_info.supports_attestation { "YES" } else { "NO" });
+            results.tee_type = tee_info.tee_type.clone();
+            results.tee_available = tee_info.supports_attestation;
+            println!("[TEE] Type: {}", tee_info.tee_type);
+            println!("[TEE] Supports attestation: {}", if tee_info.supports_attestation { "YES" } else { "NO" });
         }
         Err(e) => {
-            println!("[⚠️  TEE] Detection failed: {}", e);
+            println!("[TEE] Detection failed: {}", e);
         }
     }
     
-    // Step 1: Attest VM (TDX or AMD SEV-SNP)
-    println!("\n[🔐 ATTESTATION] Attesting VM (TDX/SEV-SNP)...");
+    // Attest VM
     match attest_vm_token() {
         Ok(result) => {
-            println!("[✓ VM] Attestation successful!");
-            if let Some(tee_type) = &result.tee_type {
-                println!("  TEE Type: {}", tee_type);
-            }
             if let Some(token) = &result.token {
-                println!("  Token length: {} chars", token.len());
-                
-                // Verify the token
-                if verify_attestation_token(token) {
-                    println!("  Token verification: PASSED");
-                } else {
-                    println!("  Token verification: FAILED (but continuing)");
-                }
-            }
-            if let Some(evidence) = &result.evidence {
-                println!("  Evidence available: {} bytes", evidence.len());
-                // Print first few lines of evidence for debugging
-                let preview: String = evidence.lines().take(5).collect::<Vec<_>>().join("\n");
-                println!("  Evidence preview:\n{}", preview);
+                println!("[TEE] VM attestation: OK (token: {} chars)", token.len());
+            } else {
+                println!("[TEE] VM attestation: OK (no token)");
             }
         }
         Err(e) => {
-            println!("[⚠️  VM] Attestation failed: {}", e);
-            println!("  Note: This is expected if not running in a Confidential VM");
+            println!("[TEE] VM attestation: SKIPPED ({})", e);
         }
     }
     
-    // Step 2: Attest GPU (NVIDIA H100 via LOCAL or NRAS)
-    println!("\n[🔐 ATTESTATION] Attesting GPU (NVIDIA H100)...");
+    // Attest GPU
     match attest_gpu_token(0) {
         Ok(result) => {
-            println!("[✓ GPU] Attestation successful!");
             if let Some(token) = &result.token {
-                println!("  Token length: {} chars", token.len());
-                
-                // Verify the token
-                if verify_attestation_token(token) {
-                    println!("  Token verification: PASSED");
-                } else {
-                    println!("  Token verification: FAILED (but continuing)");
-                }
-            }
-            if let Some(evidence) = &result.evidence {
-                println!("  Evidence available: {} bytes", evidence.len());
+                println!("[TEE] GPU attestation: OK (token: {} chars)", token.len());
+            } else {
+                println!("[TEE] GPU attestation: OK (no token)");
             }
         }
         Err(e) => {
-            println!("[⚠️  GPU] Attestation failed: {}", e);
-            println!("  Note: This is expected if NVIDIA driver doesn't support attestation");
+            println!("[TEE] GPU attestation: SKIPPED ({})", e);
         }
     }
     
-    println!("\n[✓ ATTESTATION] Phase completed - proceeding with ML training");
-    Ok(())
+    results.attestation_ms = timer.elapsed_ms();
+    println!("[TIMING] Attestation: {:.2} ms", results.attestation_ms);
 }
 
 /// Placeholder for non-WASM builds
 #[cfg(not(target_arch = "wasm32"))]
-fn perform_attestation() -> Result<(), Box<dyn Error>> {
-    println!("\n=== TEE ATTESTATION PHASE ===\n");
-    println!("[⚠️  SKIP] Attestation skipped (not running in WASM)\n");
-    Ok(())
+fn perform_attestation(results: &mut BenchmarkResults) {
+    println!("\n=== TEE ATTESTATION ===");
+    println!("[TEE] Type: None (not running in WASM)");
+    println!("[TEE] Supports attestation: NO");
+    println!("[TIMING] Attestation: 0.00 ms");
 }
 
 /// Load diabetes dataset from CSV
 fn load_csv(path: &str) -> Result<(Vec<f32>, Vec<f32>, usize), Box<dyn Error>> {
-    println!("[LOADING] Reading CSV: {}", path);
-    
     let mut reader = ReaderBuilder::new()
         .has_headers(true)
         .from_path(path)?;
@@ -143,8 +181,6 @@ fn load_csv(path: &str) -> Result<(Vec<f32>, Vec<f32>, usize), Box<dyn Error>> {
         n_samples += 1;
     }
     
-    println!("[LOADING] Loaded {} samples with {} features", n_samples, N_FEATURES);
-    
     Ok((data, labels, n_samples))
 }
 
@@ -163,81 +199,161 @@ fn calculate_mse(predictions: &[f32], actual: &[f32]) -> f32 {
     sum / predictions.len() as f32
 }
 
-/// Main training function - matches train_model.py
-fn train_and_save() -> Result<(), Box<dyn Error>> {
-    println!("\n=== TRAINING PHASE ===\n");
+/// Main entry point
+fn main() -> Result<(), Box<dyn Error>> {
+    let mut results = BenchmarkResults::new();
+    
+    // ═══════════════════════════════════════════════════════════════════
+    // HEADER
+    // ═══════════════════════════════════════════════════════════════════
+    
+    println!("╔══════════════════════════════════════════════════════════╗");
+    println!("║   WASM ML Benchmark - Diabetes Prediction                ║");
+    println!("║   Rust + wasi:gpu + TEE Attestation                      ║");
+    println!("╚══════════════════════════════════════════════════════════╝");
+    
+    // ═══════════════════════════════════════════════════════════════════
+    // GPU INFORMATION
+    // ═══════════════════════════════════════════════════════════════════
+    
+    println!("\n=== GPU INFORMATION ===");
+    
+    match GpuExecutor::new() {
+        Ok(executor) => {
+            results.gpu_available = true;
+            results.gpu_device = executor.device_name().to_string();
+            results.gpu_backend = executor.backend().to_string();
+            
+            println!("[GPU] Device: {}", results.gpu_device);
+            println!("[GPU] Backend: {}", results.gpu_backend);
+            println!("[GPU] Memory: {} MB", executor.total_memory() / (1024 * 1024));
+            println!("[GPU] Hardware: {}", if executor.is_hardware_gpu() { "YES ✓" } else { "NO (software)" });
+        }
+        Err(_) => {
+            println!("[GPU] Not available - will use CPU");
+        }
+    }
+    
+    // ═══════════════════════════════════════════════════════════════════
+    // TEE ATTESTATION
+    // ═══════════════════════════════════════════════════════════════════
+    
+    perform_attestation(&mut results);
+    
+    // ═══════════════════════════════════════════════════════════════════
+    // TRAINING PHASE
+    // ═══════════════════════════════════════════════════════════════════
+    
+    println!("\n=== TRAINING ===");
     
     // Load training data
     let (train_data, train_labels, n_samples) = load_csv("data/diabetes_train.csv")?;
+    results.train_samples = n_samples;
+    
+    println!("[TRAIN] Dataset: {} samples, {} features", n_samples, N_FEATURES);
+    println!("[TRAIN] Model: RandomForest ({} trees, depth {})", N_ESTIMATORS, MAX_DEPTH);
     
     // Create dataset
-    let dataset = Dataset::new(train_data, train_labels, n_samples, N_FEATURES)?;
+    let dataset = Dataset::new(train_data.clone(), train_labels.clone(), n_samples, N_FEATURES)?;
     
-    // Create and train RandomForest
-    println!("[TRAINING] Creating RandomForest with {} estimators, max_depth {}", 
-             N_ESTIMATORS, MAX_DEPTH);
-    
+    // Create RandomForest
     let mut rf = RandomForest::new(N_ESTIMATORS, MAX_DEPTH);
     
-    println!("[TRAINING] Starting training on CPU (this may take a while)...");
-    rf.train(&dataset)?;
+    let train_timer = Timer::new();
     
-    println!("[TRAINING] Training completed!");
+    // Try GPU training first
+    let gpu_training_ok = if let Ok(mut gpu_trainer) = GpuTrainer::new() {
+        if gpu_trainer.upload_training_data(&train_data, &train_labels, n_samples, N_FEATURES).is_ok() {
+            println!("[TRAIN] Accelerator: GPU");
+            if rf.train_with_gpu(&dataset, &gpu_trainer).is_ok() {
+                let _ = gpu_trainer.cleanup();
+                true
+            } else {
+                false
+            }
+        } else {
+            false
+        }
+    } else {
+        false
+    };
     
-    // Serialize and save model
+    if !gpu_training_ok {
+        println!("[TRAIN] Accelerator: CPU");
+        rf.train(&dataset)?;
+    }
+    
+    results.training_ms = train_timer.elapsed_ms();
+    println!("[TIMING] Training: {:.2} ms", results.training_ms);
+    
+    // Save model
     let model_bytes = bincode::serialize(&rf)?;
     fs::write(MODEL_PATH, &model_bytes)?;
     
-    println!("[TRAINING] Model saved to: {}", MODEL_PATH);
-    println!("[TRAINING] Model size: {} bytes", model_bytes.len());
+    // ═══════════════════════════════════════════════════════════════════
+    // INFERENCE PHASE
+    // ═══════════════════════════════════════════════════════════════════
     
-    Ok(())
-}
-
-/// Main inference function - matches infer_model.py
-fn load_and_infer() -> Result<(), Box<dyn Error>> {
-    println!("\n=== INFERENCE PHASE ===\n");
+    println!("\n=== INFERENCE ===");
     
     // Load test data
-    let (test_data, test_labels, n_samples) = load_csv("data/diabetes_test.csv")?;
+    let (test_data, test_labels, n_test_samples) = load_csv("data/diabetes_test.csv")?;
+    results.test_samples = n_test_samples;
     
-    // Load model
-    println!("[INFERENCE] Loading model from: {}", MODEL_PATH);
-    let model_bytes = fs::read(MODEL_PATH)?;
-    let rf: RandomForest = bincode::deserialize(&model_bytes)?;
+    println!("[INFER] Test set: {} samples", n_test_samples);
     
-    println!("[INFERENCE] Model loaded successfully");
-    println!("[INFERENCE] Number of trees: {}", rf.n_trees());
+    let infer_timer = Timer::new();
     
-    // Predict on test set (CPU)
-    println!("[INFERENCE] Running predictions on {} test samples...", n_samples);
-    let predictions = rf.predict_cpu(&test_data, n_samples, N_FEATURES)?;
+    // Try GPU inference
+    let predictions = if let Ok(predictor) = GpuPredictor::new() {
+        println!("[INFER] Accelerator: GPU");
+        
+        let n_trees = rf.n_trees();
+        let mut tree_predictions = Vec::with_capacity(n_test_samples * n_trees);
+        
+        for sample_idx in 0..n_test_samples {
+            let start = sample_idx * N_FEATURES;
+            let end = start + N_FEATURES;
+            let sample = &test_data[start..end];
+            
+            let preds = rf.get_tree_predictions(sample);
+            tree_predictions.extend(preds);
+        }
+        
+        predictor.average_predictions(&tree_predictions, n_test_samples, n_trees)?
+    } else {
+        println!("[INFER] Accelerator: CPU");
+        rf.predict_cpu(&test_data, n_test_samples, N_FEATURES)?
+    };
+    
+    results.inference_ms = infer_timer.elapsed_ms();
+    println!("[TIMING] Inference: {:.2} ms", results.inference_ms);
     
     // Calculate MSE
-    let mse = calculate_mse(&predictions, &test_labels);
+    results.mse = calculate_mse(&predictions, &test_labels);
+    println!("[INFER] MSE: {:.4}", results.mse);
     
-    // Print results - same format as Python
-    println!("[INFERENCE] Samples: {}", n_samples);
-    println!("[INFERENCE] Mean Squared Error (CPU): {:.4}", mse);
+    // ═══════════════════════════════════════════════════════════════════
+    // BENCHMARK SUMMARY
+    // ═══════════════════════════════════════════════════════════════════
     
-    Ok(())
-}
-
-/// Main entry point - matches main.py sequence with attestation
-fn main() -> Result<(), Box<dyn Error>> {
-    println!("╔════════════════════════════════════════════════╗");
-    println!("║   WASM ML Benchmark - Diabetes Prediction     ║");
-    println!("║   With TEE Attestation (VM + GPU)             ║");
-    println!("╚════════════════════════════════════════════════╝");
+    println!("\n╔══════════════════════════════════════════════════════════╗");
+    println!("║                    BENCHMARK RESULTS                      ║");
+    println!("╠══════════════════════════════════════════════════════════╣");
+    println!("║  Language:       Rust                                     ║");
+    println!("║  Attestation:  {:>10.2} ms                           ║", results.attestation_ms);
+    println!("║  Training:     {:>10.2} ms                           ║", results.training_ms);
+    println!("║  Inference:    {:>10.2} ms                           ║", results.inference_ms);
+    println!("║  MSE:          {:>10.4}                             ║", results.mse);
+    println!("╚══════════════════════════════════════════════════════════╝");
     
-    // Step 0: TEE Attestation (NEW)
-    perform_attestation()?;
+    // ═══════════════════════════════════════════════════════════════════
+    // JSON OUTPUT FOR BENCHMARK AGGREGATION
+    // ═══════════════════════════════════════════════════════════════════
     
-    // Step 1: Training (matches MLTrainer.train_and_split())
-    train_and_save()?;
-    
-    // Step 2: Inference (matches MLInferencer.run_inference())
-    load_and_infer()?;
+    println!("\n### BENCHMARK_JSON ###");
+    println!("{}", results.to_json());
+    println!("### END_BENCHMARK_JSON ###");
     
     println!("\n✅ Benchmark completed successfully!");
     

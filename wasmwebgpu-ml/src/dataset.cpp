@@ -34,7 +34,6 @@ Dataset::Dataset(const std::vector<float>& data,
 }
 
 Dataset Dataset::from_csv(const std::string& filepath, size_t n_features) {
-    std::cout << "[LOADING] Reading CSV: " << filepath << std::endl;
     std::ifstream file(filepath);
     if (!file.is_open()) {
         fprintf(stderr, "Cannot open file: %s\n", filepath.c_str());
@@ -81,8 +80,6 @@ Dataset Dataset::from_csv(const std::string& filepath, size_t n_features) {
         n_samples++;
     }
     file.close();
-    std::cout << "[LOADING] Loaded " << n_samples << " samples with " 
-              << n_features << " features" << std::endl;
     return ml::Dataset(data, labels, n_samples, n_features);
 }
 

@@ -1,0 +1,107 @@
+/// Low-level GPU compute interface
+/// 
+/// Provides buffer management and raw kernel dispatch capabilities.
+/// This is the foundation layer that ml-kernels builds upon.
+
+interface compute {
+    /// Buffer usage flags (can be combined with bitwise OR)
+    flags buffer-usage {
+        /// Buffer can be mapped for reading
+        map-read,
+        /// Buffer can be mapped for writing  
+        map-write,
+        /// Buffer can be used as copy source
+        copy-src,
+        /// Buffer can be used as copy destination
+        copy-dst,
+        /// Buffer can be used as uniform buffer
+        uniform,
+        /// Buffer can be used as storage buffer
+        storage,
+    }
+
+    /// Handle to a GPU buffer
+    type buffer-id = u32;
+
+    /// Error types for GPU operations
+    variant gpu-error {
+        /// Buffer allocation failed
+        out-of-memory,
+        /// Invalid buffer ID
+        invalid-buffer,
+        /// Kernel execution failed
+        kernel-error(string),
+        /// Device not available
+        device-unavailable,
+        /// Invalid parameters
+        invalid-params(string),
+    }
+
+    /// GPU device information
+    record device-info {
+        /// Device name (e.g., "NVIDIA H100 NVL")
+        name: string,
+        /// Backend type ("cuda", "vulkan", "webgpu")
+        backend: string,
+        /// Total memory in bytes
+        total-memory: u64,
+        /// Whether this is a hardware GPU
+        is-hardware: bool,
+        /// Compute capability (for CUDA) or API version
+        compute-capability: string,
+    }
+
+    /// Get information about the GPU device
+    get-device-info: func() -> device-info;
+
+    /// Create a new GPU buffer
+    /// 
+    /// # Parameters
+    /// - `size`: Buffer size in bytes
+    /// - `usage`: Buffer usage flags
+    /// 
+    /// # Returns
+    /// Buffer handle or error
+    buffer-create: func(size: u64, usage: buffer-usage) -> result<buffer-id, gpu-error>;
+
+    /// Write data to a GPU buffer
+    /// 
+    /// # Parameters
+    /// - `buffer`: Buffer handle
+    /// - `offset`: Byte offset in buffer
+    /// - `data`: Data to write
+    buffer-write: func(buffer: buffer-id, offset: u64, data: list<u8>) -> result<_, gpu-error>;
+
+    /// Read data from a GPU buffer
+    /// 
+    /// # Parameters
+    /// - `buffer`: Buffer handle  
+    /// - `offset`: Byte offset in buffer
+    /// - `size`: Number of bytes to read
+    /// 
+    /// # Returns
+    /// Data read from buffer
+    buffer-read: func(buffer: buffer-id, offset: u64, size: u32) -> result<list<u8>, gpu-error>;
+
+    /// Copy data between GPU buffers
+    /// 
+    /// # Parameters
+    /// - `src`: Source buffer
+    /// - `src-offset`: Offset in source buffer
+    /// - `dst`: Destination buffer
+    /// - `dst-offset`: Offset in destination buffer
+    /// - `size`: Number of bytes to copy
+    buffer-copy: func(
+        src: buffer-id, 
+        src-offset: u64,
+        dst: buffer-id,
+        dst-offset: u64,
+        size: u64
+    ) -> result<_, gpu-error>;
+
+    /// Destroy a GPU buffer and free its memory
+    buffer-destroy: func(buffer: buffer-id) -> result<_, gpu-error>;
+
+    /// Synchronize GPU operations (wait for completion)
+    sync: func();
+}

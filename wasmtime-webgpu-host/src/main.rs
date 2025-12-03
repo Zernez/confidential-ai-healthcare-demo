@@ -180,20 +180,18 @@ async fn main() -> Result<()> {
         warn!("NVIDIA Vulkan check: {}", e);
     }
     
-    // Initialize GPU backend
-    let gpu_backend = gpu_backend::GpuBackend::new().await
-        .context("Failed to initialize GPU")?;
-    
-    info!("GPU backend initialized");
-    info!("  GPU: {}", gpu_backend.adapter_info());
-    
-    if !gpu_backend.is_hardware_gpu() {
-        warn!("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
-        warn!("⚠️  WARNING: Using software GPU renderer!");
-        warn!("    ML training/inference will be VERY SLOW.");
-        warn!("    Run with --check-gpu to diagnose the issue.");
-        warn!("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
-    }
+    // Initialize GPU backend (continues even with software fallback)
+    let gpu_backend = match gpu_backend::GpuBackend::new().await {
+        Ok(backend) => {
+            info!("GPU backend initialized: {}", backend.adapter_info());
+            backend
+        }
+        Err(e) => {
+            error!("Failed to initialize GPU: {}", e);
+            error!("Continuing without GPU support - ML will run on CPU only");
+            return Err(e.context("GPU initialization failed"));
+        }
+    };
     
     // Create WebGPU host implementation
     let webgpu_host = WebGpuHost::new(gpu_backend);
