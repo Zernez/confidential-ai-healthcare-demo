@@ -7,7 +7,6 @@ use pyo3::prelude::*;
 use pyo3::exceptions::PyRuntimeError;
 use serde::{Deserialize, Serialize};
 use std::process::Command;
-use tokio::runtime::Runtime;
 
 // ═══════════════════════════════════════════════════════════════════════════
 // Data Structures (matching WASM host)
@@ -107,15 +106,12 @@ fn detect_tee() -> PyResult<TeeInfo> {
     }
     
     // Check for TDX device
-    #[cfg(feature = "attestation-tdx")]
-    {
-        if std::path::Path::new("/dev/tdx_guest").exists() ||
-           std::path::Path::new("/dev/tdx-guest").exists() {
-            return Ok(TeeInfo {
-                tee_type: "Intel TDX".to_string(),
-                supports_attestation: true,
-            });
-        }
+    if std::path::Path::new("/dev/tdx_guest").exists() ||
+       std::path::Path::new("/dev/tdx-guest").exists() {
+        return Ok(TeeInfo {
+            tee_type: "Intel TDX".to_string(),
+            supports_attestation: true,
+        });
     }
     
     Ok(TeeInfo {
@@ -185,13 +181,13 @@ fn attest_amd_sev_snp() -> PyResult<AttestationResult> {
     let ak_pub = vtpm::get_ak_pub()
         .map_err(|e| PyRuntimeError::new_err(format!("Failed to get AK public key: {}", e)))?;
     
-    // Step 5: Get VCEK certificate chain from Azure IMDS
-    let rt = Runtime::new()
-        .map_err(|e| PyRuntimeError::new_err(format!("Failed to create tokio runtime: {}", e)))?;
-    
-    let certs = rt.block_on(async {
-        amd_vtpm::imds::get_certs().await
-    }).map_err(|e| PyRuntimeError::new_err(format!("Failed to get VCEK certs: {}", e)))?;
+    // Step 5: Get VCEK certificate chain from Azure IMDS (blocking)
+    let certs = tokio::runtime::Runtime::new()
+        .map_err(|e| PyRuntimeError::new_err(format!("Failed to create runtime: {}", e)))?
+        .block_on(async {
+            amd_vtpm::imds::get_certs().await
+        })
+        .map_err(|e| PyRuntimeError::new_err(format!("Failed to get VCEK certs: {}", e)))?;
     
     // Build evidence JSON
     let evidence = serde_json::json!({
@@ -259,8 +255,20 @@ fn attest_gpu(gpu_index: u32) -> PyResult<AttestationResult> {
     // Use nvattest CLI for local attestation (same as WASM host)
     let output = Command::new("nvattest")
         .args(["attest", "--device", "gpu", "--verifier", "local"])
-        .output()
-        .map_err(|e| PyRuntimeError::new_err(format!("Failed to run nvattest: {}. Is it installed?", e)))?;
+        .output();
+    
+    let output = match output {
+        Ok(o) => o,
+        Err(e) => {
+            return Ok(AttestationResult {
+                success: false,
+                token: None,
+                evidence: None,
+                error: Some(format!("Failed to run nvattest: {}. Is it installed?", e)),
+                tee_type: None,
+            });
+        }
+    };
     
     if !output.status.success() {
         let stderr = String::from_utf8_lossy(&output.stderr);
@@ -276,8 +284,18 @@ fn attest_gpu(gpu_index: u32) -> PyResult<AttestationResult> {
     let stdout = String::from_utf8_lossy(&output.stdout);
     
     // Parse JSON output
-    let json: serde_json::Value = serde_json::from_str(&stdout)
-        .map_err(|e| PyRuntimeError::new_err(format!("Failed to parse nvattest output: {}", e)))?;
+    let json: serde_json::Value = match serde_json::from_str(&stdout) {
+        Ok(v) => v,
+        Err(e) => {
+            return Ok(AttestationResult {
+                success: false,
+                token: None,
+                evidence: None,
+                error: Some(format!("Failed to parse nvattest output: {}", e)),
+                tee_type: None,
+            });
+        }
+    };
     
     // Check result code
     let result_code = json.get("result_code")

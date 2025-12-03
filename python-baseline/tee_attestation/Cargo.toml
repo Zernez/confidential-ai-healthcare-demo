@@ -31,19 +31,14 @@ base64 = "0.22"
 # Hex encoding
 hex = "0.4"
 
-# AMD SEV-SNP attestation via vTPM
-vtpm-attestation = { version = "0.6", optional = true }
-amd-vtpm = { version = "0.2", optional = true }
-sev = { version = "4.0", optional = true }
-
-# TDX attestation (optional)
-lunal-attestation = { version = "0.5", optional = true }
+# AMD SEV-SNP attestation via vTPM (local paths - same as wasmtime-gpu-host)
+vtpm-attestation = { path = "../../attestation-rs/vtpm-attestation", optional = true }
+amd-vtpm = { path = "../../attestation-rs/amd-vtpm", optional = true }
+sev = { version = "6.2.1", features = ["crypto_nossl"], optional = true }
 
 [features]
 default = ["attestation-amd"]
-attestation-amd = ["vtpm-attestation", "amd-vtpm", "sev"]
-attestation-tdx = ["lunal-attestation"]
-attestation-nvidia = ["lunal-attestation"]
+attestation-amd = ["vtpm-attestation", "vtpm-attestation/tpm", "amd-vtpm", "amd-vtpm/attester", "sev"]
 
 [profile.release]
 lto = true
