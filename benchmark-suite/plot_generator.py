@@ -136,6 +136,9 @@ class PlotGenerator:
         # Combined figure for paper
         self.plot_combined_figure(report)
         
+        # Cost analysis
+        self.plot_cost_analysis(report)
+        
         print(f"   Plots saved to: {self.output_dir}")
         
     def _prepare_data(self, report, metric: str) -> tuple:
@@ -223,7 +226,6 @@ class PlotGenerator:
                         fontweight='bold'
                     )
         
-        ax.set_title('TEE Attestation Time Distribution', fontweight='bold', pad=15)
         ax.set_xlabel('')
         ax.set_ylabel('Time (ms)')
         
@@ -275,7 +277,6 @@ class PlotGenerator:
                         fontweight='bold'
                     )
         
-        ax.set_title('Training Time Distribution (200 trees)', fontweight='bold', pad=15)
         ax.set_xlabel('')
         ax.set_ylabel('Time (ms)')
         
@@ -327,7 +328,6 @@ class PlotGenerator:
                         fontweight='bold'
                     )
         
-        ax.set_title('Inference Time Distribution (89 samples)', fontweight='bold', pad=15)
         ax.set_xlabel('')
         ax.set_ylabel('Time (ms)')
         
@@ -355,8 +355,6 @@ class PlotGenerator:
         ax.set_xticks(range(len(labels)))
         ax.set_xticklabels(labels)
         ax.set_ylabel('Time (ms)')
-        ax.set_title(title, fontweight='bold')
-        
         plt.tight_layout()
         plt.savefig(self.output_dir / f'violin_{metric}.pdf')
         plt.savefig(self.output_dir / f'violin_{metric}.png')
@@ -431,7 +429,6 @@ class PlotGenerator:
         ax.set_xticks(x)
         ax.set_xticklabels(labels, fontweight='bold')
         ax.set_ylabel('Time (ms)', fontweight='bold')
-        ax.set_title('Benchmark Comparison', fontweight='bold', pad=10)
         
         # Log scale for better visualization
         ax.set_yscale('log')
@@ -527,7 +524,6 @@ class PlotGenerator:
         ax.set_xticks(x)
         ax.set_xticklabels(labels, fontweight='bold')
         ax.set_ylabel('Time (ms)', fontweight='bold')
-        ax.set_title('Total Execution Time Breakdown', fontweight='bold', pad=10)
         
         # Legend below
         ax.legend(loc='upper center', bbox_to_anchor=(0.5, -0.1),
@@ -593,7 +589,6 @@ class PlotGenerator:
                                 fontweight='bold'
                             )
         
-        ax.set_title('(a) Training Time Distribution', fontweight='bold', pad=10)
         ax.set_xlabel('')
         ax.set_ylabel('Time (ms)')
         
@@ -633,7 +628,6 @@ class PlotGenerator:
                                 fontweight='bold'
                             )
         
-        ax.set_title('(b) Inference Time Distribution', fontweight='bold', pad=10)
         ax.set_xlabel('')
         ax.set_ylabel('Time (ms)')
         
@@ -681,7 +675,6 @@ class PlotGenerator:
             ax.set_xticks(x)
             ax.set_xticklabels(labels_bar, fontweight='bold')
             ax.set_ylabel('Time (ms)')
-            ax.set_title('(c) Total Execution Time Breakdown', fontweight='bold', pad=10)
             ax.legend(loc='upper right', framealpha=0.95, fontsize=7,
                      edgecolor='#cccccc')
             
@@ -696,6 +689,121 @@ class PlotGenerator:
         plt.close()
         
         print(f"   📈 Combined figure: {self.output_dir / 'combined_figure.pdf'}")
+
+    def plot_cost_analysis(self, report):
+        """
+        Generate cost analysis plots based on Azure NCC40ads H100 v5 pricing.
+        
+        Azure pricing (West Europe):
+        - VM NCC40ads H100 v5: $10.74/hour
+        - Premium SSD 60GB (P6): ~$0.00655/hour
+        - Total: ~$10.7466/hour
+        
+        Generates two separate plots:
+        - throughput.pdf: Operations per hour
+        - cost_per_1000_ops.pdf: Cost per 1000 operations
+        """
+        # Azure NCC40ads H100 v5 pricing (West Europe)
+        HOURLY_RATE = 10.7466  # USD/hour
+        COST_PER_MS = HOURLY_RATE / (3600 * 1000)  # USD per millisecond
+        
+        benchmarks = ["python", "cpp", "rust"]
+        
+        # Collect data
+        labels = []
+        total_times = []  # in ms
+        
+        for name in benchmarks:
+            if name in report.benchmarks:
+                stats = report.benchmarks[name]
+                labels.append(SHORT_NAMES.get(name, name))
+                
+                att = stats.attestation.mean if stats.attestation else 0
+                train = stats.training.mean if stats.training else 0
+                inf = stats.inference.mean if stats.inference else 0
+                total_times.append(att + train + inf)
+        
+        if not labels:
+            return
+        
+        # Calculate metrics
+        ops_per_hour = [3600 * 1000 / t for t in total_times]  # operations per hour
+        cost_per_op = [t * COST_PER_MS for t in total_times]   # USD per operation
+        cost_per_1000 = [c * 1000 for c in cost_per_op]        # USD per 1000 operations
+        
+        x = np.arange(len(labels))
+        bar_colors = [COLORS.get(name, '#888888') for name in benchmarks if name in report.benchmarks]
+        
+        # ===== Plot 1: Throughput (ops/hour) =====
+        fig, ax = plt.subplots(figsize=(COLUMN_WIDTH + 0.3, 3))
+        
+        bars = ax.bar(x, ops_per_hour, color=bar_colors, 
+                      edgecolor='#333333', linewidth=0.5, width=0.6)
+        
+        # Add value labels
+        for bar, val in zip(bars, ops_per_hour):
+            ax.annotate(f'{val:.0f}',
+                       xy=(bar.get_x() + bar.get_width() / 2, bar.get_height()),
+                       xytext=(0, 5),
+                       textcoords='offset points',
+                       ha='center', va='bottom',
+                       fontsize=FONT_SIZES['value'],
+                       fontweight='bold')
+        
+        ax.set_xticks(x)
+        ax.set_xticklabels(labels, fontweight='bold')
+        ax.set_ylabel('Operations / Hour', fontweight='bold')
+        
+        # Add padding at top
+        ymax = max(ops_per_hour)
+        ax.set_ylim(0, ymax * 1.15)
+        
+        ax.yaxis.grid(True, linestyle='--', alpha=0.7)
+        ax.xaxis.grid(False)
+        
+        plt.tight_layout()
+        plt.savefig(self.output_dir / 'throughput.pdf')
+        plt.savefig(self.output_dir / 'throughput.png')
+        plt.close()
+        
+        # ===== Plot 2: Cost per 1000 operations =====
+        fig, ax = plt.subplots(figsize=(COLUMN_WIDTH + 0.3, 3))
+        
+        bars = ax.bar(x, cost_per_1000, color=bar_colors,
+                      edgecolor='#333333', linewidth=0.5, width=0.6)
+        
+        # Add value labels
+        for bar, val in zip(bars, cost_per_1000):
+            ax.annotate(f'${val:.4f}',
+                       xy=(bar.get_x() + bar.get_width() / 2, bar.get_height()),
+                       xytext=(0, 5),
+                       textcoords='offset points',
+                       ha='center', va='bottom',
+                       fontsize=FONT_SIZES['value'],
+                       fontweight='bold')
+        
+        ax.set_xticks(x)
+        ax.set_xticklabels(labels, fontweight='bold')
+        ax.set_ylabel('Cost (USD / 1000 ops)', fontweight='bold')
+        
+        # Add padding at top
+        ymax = max(cost_per_1000)
+        ax.set_ylim(0, ymax * 1.2)
+        
+        ax.yaxis.grid(True, linestyle='--', alpha=0.7)
+        ax.xaxis.grid(False)
+        
+        plt.tight_layout()
+        plt.savefig(self.output_dir / 'cost_per_1000_ops.pdf')
+        plt.savefig(self.output_dir / 'cost_per_1000_ops.png')
+        plt.close()
+        
+        # Print summary
+        print(f"   💰 Cost analysis: throughput.pdf, cost_per_1000_ops.pdf")
+        print(f"\n📊 Cost Summary (Azure NCC40ads H100 v5 - West Europe @ ${HOURLY_RATE:.2f}/hr):")
+        for i, name in enumerate([n for n in benchmarks if n in report.benchmarks]):
+            label = SHORT_NAMES.get(name, name)
+            print(f"   {label}: ${cost_per_op[i]:.6f}/op, {ops_per_hour[i]:.0f} ops/hr, ${cost_per_1000[i]:.4f}/1000 ops")
 
     def plot_bar_grouped_paper_style(self, report):
         """
@@ -763,7 +871,6 @@ class PlotGenerator:
         ax.set_xticks(x)
         ax.set_xticklabels(labels, fontweight='bold')
         ax.set_ylabel('Time (ms)', fontweight='bold')
-        ax.set_title('Benchmark Algorithm', fontweight='bold')
         
         # Log scale
         ax.set_yscale('log')
